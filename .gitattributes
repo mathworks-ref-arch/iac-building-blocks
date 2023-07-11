@@ -1,9 +1,3 @@
-#
-# If you plan to edit this file, make sure you are familiar with the MathWorks
-# internal documentation regarding line-ending issues:
-#
-# https://confluence.mathworks.com/pages/viewpage.action?pageId=477605744
-#
 *       text=auto
 *.asp   text
 *.cgi   text
