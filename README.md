@@ -8,7 +8,7 @@ You can explore the templates to learn more about the infrastructure supporting 
 You are responsible for the cost of the cloud services you use when you create cloud resources using these templates. Resource settings, such as instance type, affect the cost of deployment. For cost estimates, see the pricing pages for each cloud service you use. Prices are subject to change.
 
 ## Publishing Process
-Changes to the IaC templates in this repository automatically update the public registries of MathWorks. The MathWorks reference architectures directly use the versions available in those public registries. For more information, refer to the documentation of the cloud provider.
+Changes to the IaC templates in this repository automatically update the public MathWorks IaC templates stored on the corresponding cloud platforms such as the Amazon S3&trade; bucket. The MathWorks reference architectures directly use the versions available in those public locations. For more information, refer to the documentation of the cloud provider.
 
 ### Versioning the Templates
 Each template in this repository uses semantic versioning in the form of `vMAJOR.MINOR.PATCH`. Major updates to the IaC templates result in new versions that you can find in the repository. You can find the other updates in the Git&trade; commit history.
@@ -22,8 +22,10 @@ Each template in this repository uses semantic versioning in the form of `vMAJOR
 ## Related Repositories
  - [matlab-on-aws](https://github.com/mathworks-ref-arch/matlab-on-aws)
  - [matlab-parallel-server-on-aws](https://github.com/mathworks-ref-arch/matlab-parallel-server-on-aws)
+ - [license-manager-for-matlab-on-aws](https://github.com/mathworks-ref-arch/license-manager-for-matlab-on-aws)
  - [matlab-on-azure](https://github.com/mathworks-ref-arch/matlab-on-azure)
  - [matab-parallel-server-on-azure](https://github.com/mathworks-ref-arch/matlab-parallel-server-on-azure)
+ - [license-manager-for-matlab-on-azure](https://github.com/mathworks-ref-arch/license-manager-for-matlab-on-azure)
 
 ## Technical Support
 For support, visit [MathWorks Technical Support](https://www.mathworks.com/support/contact_us.html).

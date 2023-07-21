@@ -1,0 +1,159 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  MathWorks Reference Architectures Template Security Group: Creates a security group to control the inbound and outbound traffic for the resources deployed in AWS. version: v1.0.0
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network configuration
+        Parameters:
+          - VpcId
+          - CidrIp
+      - Label:
+          default: Access type to provide
+        Parameters:
+          - SSHAccess
+          - RDPAccess
+          - HTTPSAccess
+          - NICEDCVAccess
+          - MJSAccess
+          - LicenseManagerAccess
+          - InternalAccess
+
+    ParameterLabels:
+      VpcId:
+        default: VPC ID
+      CidrIp:
+        default: IPv4 address range
+      SSHAccess:
+        default: SSH
+      RDPAccess:
+        default: RDP
+      HTTPSAccess:
+        default: HTTPS
+      NICEDCVAccess:
+        default: NICE DCV
+      MJSAccess:
+        default: MATLAB Job Scheduler
+      LicenseManagerAccess:
+        default: License Manager
+      InternalAccess:
+        default: Internal
+
+Parameters:
+  VpcId:
+    Type: 'AWS::EC2::VPC::Id'
+    Description: VPC for which to create the security group
+  CidrIp:
+    Type: String
+    Description: Block of addresses to allow traffic from
+  SSHAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  RDPAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  HTTPSAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  NICEDCVAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  MJSAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  LicenseManagerAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  InternalAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+    Description: Allow all traffic inside the security group
+
+Conditions:
+  AllowSSH:      !Equals [!Ref SSHAccess,            'Yes']
+  AllowRDP:      !Equals [!Ref RDPAccess,            'Yes']
+  AllowHTTPS:    !Equals [!Ref HTTPSAccess,          'Yes']
+  AllowNICEDCV:  !Equals [!Ref NICEDCVAccess,        'Yes']
+  AllowMJS:      !Equals [!Ref MJSAccess,            'Yes']
+  AllowLM:       !Equals [!Ref LicenseManagerAccess, 'Yes']
+  AllowInternal: !Equals [!Ref InternalAccess,       'Yes']
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: Control access from local clients
+      SecurityGroupIngress:
+        - !If
+          - AllowSSH
+          - FromPort: 22
+            ToPort: 22
+            CidrIp: !Ref CidrIp
+            IpProtocol: tcp
+            Description: Allow SSH traffic
+          - !Ref 'AWS::NoValue'
+        - !If
+          - AllowRDP
+          - FromPort: 3389
+            ToPort: 3389
+            CidrIp: !Ref CidrIp
+            IpProtocol: tcp
+            Description: Allow RDP traffic
+          - !Ref 'AWS::NoValue'
+        - !If
+          - AllowHTTPS
+          - FromPort: 443
+            ToPort: 443
+            CidrIp: !Ref CidrIp
+            IpProtocol: tcp
+            Description: Allow HTTPS traffic
+          - !Ref 'AWS::NoValue'
+        - !If
+          - AllowNICEDCV
+          - FromPort: 8443
+            ToPort: 8443
+            CidrIp: !Ref CidrIp
+            IpProtocol: tcp
+            Description: Allow NICE DCV traffic
+          - !Ref 'AWS::NoValue'
+        - !If
+          - AllowMJS
+          - FromPort: 27350
+            ToPort: 27613
+            CidrIp: !Ref CidrIp
+            IpProtocol: tcp
+            Description: Allow MATLAB Job Scheduler traffic
+          - !Ref 'AWS::NoValue'
+        - !If
+          - AllowLM
+          - FromPort: 27000
+            ToPort: 27010
+            CidrIp: !Ref CidrIp
+            IpProtocol: tcp
+            Description: Allow License Manager traffic
+          - !Ref 'AWS::NoValue'
+
+  InternalAccessRule:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Condition: AllowInternal
+    Properties:
+      GroupId: !Ref SecurityGroup
+      SourceSecurityGroupId: !Ref SecurityGroup
+      IpProtocol: '-1'
+      Description: Allow internal traffic
+
+Outputs:
+  SecurityGroupId:
+    Value: !Ref SecurityGroup
