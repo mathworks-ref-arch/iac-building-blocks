@@ -1,0 +1,136 @@
+name: Publish IaC Templates
+
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore: 
+      - "**.md"
+  workflow_dispatch:
+
+env:
+  RED: \033[0;31m
+  GREEN: \033[0;32m
+  ORANGE: \033[0;33m
+  NC: \033[0m
+  TICK: \xE2\x9C\x94
+  CROSS: \xE2\x9C\x98
+
+jobs:
+
+  validate-structure:
+    strategy:
+      fail-fast: false
+      matrix:
+        cloud: [aws]
+
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./${{ matrix.cloud }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Show directory structure
+        run: tree -a .
+
+      - name: Test directory structure
+        run: |
+          for MODULE in *; do
+            if [[ -d "${MODULE}" ]]; then
+              (
+                cd "${MODULE}"
+                echo -e "${{ env.GREEN }}Validating ${MODULE}${{ env.NC }}"
+
+                for MAJOR_VERSION in *; do
+                
+                  echo -e "${{ env.GREEN }}> ${MAJOR_VERSION}${{ env.NC }}"
+                  
+                  if [[ ! -d "${MAJOR_VERSION}" ]]; then
+                    echo -e '${{ env.RED }}Error: Should be a directory.${{ env.NC }}'
+                    exit 1
+                  fi
+                  
+                  if [[ ! "${MAJOR_VERSION}" =~ ^v[0-9]+$ ]]; then
+                    echo -e '${{ env.RED }}Error: Name should be a major version (v[0-9])${{ env.NC }}'
+                    exit 1
+                  fi
+                  
+                  VERSION_FILE="${MAJOR_VERSION}/.version"
+                  if [[ ! -f "${VERSION_FILE}" ]]; then
+                    echo -e '${{ env.RED }}Error: .version file does not exist.${{ env.NC }}'
+                    exit 1
+                  fi
+
+                  VERSION=$(cat "${VERSION_FILE}")
+                  if [[ ! "${VERSION}" =~ ^${MAJOR_VERSION}\.[0-9]+\.[0-9]+$ ]]; then
+                    echo -e "${{ env.RED }}Error: Version is incorrect, expected ${MAJOR_VERSION}.X.X${{ env.NC }}"
+                    exit 1
+                  fi
+
+                  echo -e '${{ env.GREEN }}${{ env.TICK }}${{ env.NC }}'
+
+                done
+              )
+            fi
+          done
+
+
+  aws-publish:
+    needs: validate-structure
+    
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      id-token: write
+    
+    defaults:
+      run:
+        working-directory: ./aws
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: us-east-1
+
+      - name: Publish templates to S3
+        run: |
+          for MODULE in *; do
+            if [[ -d "${MODULE}" ]]; then
+              (
+                cd "${MODULE}"
+                echo -e "${{ env.GREEN }}Updating ${MODULE}${{ env.NC }}"
+
+                for MAJOR_VERSION in *; do
+                  VERSION_FILE="${MAJOR_VERSION}/.version"
+                  VERSION=$(cat "${VERSION_FILE}")
+
+                  echo -e "${{ env.GREEN }}> ${MODULE}@${VERSION}${{ env.NC }}"
+
+                  S3_URI="s3://${{ vars.S3_BUCKET_NAME }}/${MODULE}/${VERSION//.//}/"
+                  if aws s3 ls "${S3_URI}"; then
+                    echo -e "${{ env.ORANGE }}Version already published${{ env.NC }}"
+
+                  elif (( $? == 1 )); then
+                    echo -e "${{ env.GREEN }}Publishing new version${{ env.NC }}"
+                    aws s3 sync "${MAJOR_VERSION}" "${S3_URI}" --acl public-read
+                    echo -e '${{ env.GREEN }}${{ env.TICK }}${{ env.NC }}'
+
+                  else
+                    echo -e '${{ env.RED }}${{ env.CROSS }} Failed to list bucket${{ env.NC }}'
+                    exit 1
+
+                 fi
+
+                done
+              )
+            fi
+          done
