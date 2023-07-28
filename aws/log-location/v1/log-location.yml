@@ -1,0 +1,39 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  MathWorks Reference Architectures Template Log Location: Creates a CloudWatch log group to store log events from AWS services. version: v1.0.0
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Log configuration
+        Parameters:
+          - LogGroupName
+
+    ParameterLabels:
+      LogGroupName:
+        default: Log group name
+
+Parameters:
+  LogGroupName:
+    Type: String
+    Default: ''
+    Description: Name of the log group. If you don't specify a name, AWS CloudFormation generates a unique ID for the log group.
+
+Conditions:
+  GenerateGroupName: !Equals [!Ref LogGroupName, '']
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !If
+                      - GenerateGroupName
+                      - !Ref AWS::NoValue
+                      - !Ref LogGroupName
+
+Outputs:
+  LogGroupName:
+    Value: !Ref LogGroup

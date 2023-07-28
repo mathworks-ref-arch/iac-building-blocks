@@ -9,6 +9,7 @@ Each template configures a specific chunk of infrastructure. MathWorks&reg; refe
 | Name          | Description |
 | ------------- | ----------- |
 | [security-group](security-group) | Creates a security group to control the inbound and outbound traffic for the resources deployed in AWS. |
+| [log-location](log-location) | Creates a CloudWatch log group to store log events from AWS services. |
 
 ## Usage
 
