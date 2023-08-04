@@ -26,7 +26,7 @@ The following code shows you how to create a nested stack based on the security 
 
 The `AWS::CloudFormation::Stack` resource declares the nested stack.
  - The `TemplateURL` property defines the template to use. Set it to the Amazon S3 bucket URL of the security group template version `v1.0.0`.
- - The `Parameters` property defines the inputs to the nested stack. Set the parameters `VpcId` and `CidrIp` to the values of the root stack. Add subsequent parameters to explicitly allow SSH, NICE DCV, and MATLAB Proxy access but deny RDP access. Leave other parameters at their default values.
+ - The `Parameters` property defines the inputs to the nested stack. Set the parameters `VpcId` and `CidrIp` to the values of the root stack. Add subsequent parameters to explicitly allow SSH, NICE DCV, and MATLAB Job Scheduler access but deny RDP access. Leave other parameters at their default values.
 
 The [GetAtt](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intrinsic-function-reference-getatt.html) function retrieves an output value from the nested stack to the root stack.
 ```json
@@ -50,10 +50,10 @@ The [GetAtt](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/intr
                 "Parameters" : {
                     "VpcId" : { "Ref" : "VPC" },
                     "CidrIp" : { "Ref" : "IPAddresses" },
-                    "SshAccess" : "Yes",
-                    "RdpAccess" : "No",
-                    "NiceDcvAccess" : "Yes",
-                    "MatlabProxyAccess" : "Yes"
+                    "SSHAccess" : "Yes",
+                    "RDPAccess" : "No",
+                    "NICEDCVAccess" : "Yes",
+                    "MJSAccess" : "Yes"
                 }
             }
         }
