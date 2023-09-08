@@ -2,7 +2,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 
 Description: >
-  MathWorks Reference Architectures Template Security Group: Creates a security group to control the inbound and outbound traffic for the resources deployed in AWS. version: v1.0.0
+  MathWorks Reference Architectures Template Security Group: Creates a security group to control the inbound and outbound traffic for the resources deployed in AWS. version: v1.1.0
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -19,6 +19,7 @@ Metadata:
           - RDPAccess
           - HTTPSAccess
           - NICEDCVAccess
+          - MATLABProxyAccess
           - MJSAccess
           - LicenseManagerAccess
           - InternalAccess
@@ -36,6 +37,8 @@ Metadata:
         default: HTTPS
       NICEDCVAccess:
         default: NICE DCV
+      MATLABProxyAccess:
+        default: matlab-proxy
       MJSAccess:
         default: MATLAB Job Scheduler
       LicenseManagerAccess:
@@ -66,6 +69,10 @@ Parameters:
     Type: String
     AllowedValues: ['Yes', 'No']
     Default: 'No'
+  MATLABProxyAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
   MJSAccess:
     Type: String
     AllowedValues: ['Yes', 'No']
@@ -81,13 +88,14 @@ Parameters:
     Description: Allow all traffic inside the security group
 
 Conditions:
-  AllowSSH:      !Equals [!Ref SSHAccess,            'Yes']
-  AllowRDP:      !Equals [!Ref RDPAccess,            'Yes']
-  AllowHTTPS:    !Equals [!Ref HTTPSAccess,          'Yes']
-  AllowNICEDCV:  !Equals [!Ref NICEDCVAccess,        'Yes']
-  AllowMJS:      !Equals [!Ref MJSAccess,            'Yes']
-  AllowLM:       !Equals [!Ref LicenseManagerAccess, 'Yes']
-  AllowInternal: !Equals [!Ref InternalAccess,       'Yes']
+  AllowSSH:           !Equals [!Ref SSHAccess,            'Yes']
+  AllowRDP:           !Equals [!Ref RDPAccess,            'Yes']
+  AllowHTTPS:         !Equals [!Ref HTTPSAccess,          'Yes']
+  AllowNICEDCV:       !Equals [!Ref NICEDCVAccess,        'Yes']
+  AllowMATLABProxy:   !Equals [!Ref MATLABProxyAccess,    'Yes']
+  AllowMJS:           !Equals [!Ref MJSAccess,            'Yes']
+  AllowLM:            !Equals [!Ref LicenseManagerAccess, 'Yes']
+  AllowInternal:      !Equals [!Ref InternalAccess,       'Yes']
 
 Resources:
   SecurityGroup:
@@ -127,6 +135,14 @@ Resources:
             CidrIp: !Ref CidrIp
             IpProtocol: tcp
             Description: Allow NICE DCV traffic
+          - !Ref 'AWS::NoValue'
+        - !If
+          - AllowMATLABProxy
+          - FromPort: 8123
+            ToPort: 8123
+            CidrIp: !Ref CidrIp
+            IpProtocol: tcp
+            Description: Allow matlab-proxy traffic
           - !Ref 'AWS::NoValue'
         - !If
           - AllowMJS

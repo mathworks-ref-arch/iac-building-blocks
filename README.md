@@ -24,7 +24,7 @@ Each template in this repository uses semantic versioning in the form of `vMAJOR
  - [matlab-parallel-server-on-aws](https://github.com/mathworks-ref-arch/matlab-parallel-server-on-aws)
  - [license-manager-for-matlab-on-aws](https://github.com/mathworks-ref-arch/license-manager-for-matlab-on-aws)
  - [matlab-on-azure](https://github.com/mathworks-ref-arch/matlab-on-azure)
- - [matab-parallel-server-on-azure](https://github.com/mathworks-ref-arch/matlab-parallel-server-on-azure)
+ - [matlab-parallel-server-on-azure](https://github.com/mathworks-ref-arch/matlab-parallel-server-on-azure)
  - [license-manager-for-matlab-on-azure](https://github.com/mathworks-ref-arch/license-manager-for-matlab-on-azure)
 
 ## Technical Support
