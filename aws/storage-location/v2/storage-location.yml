@@ -183,6 +183,7 @@ Resources:
     Condition: DeleteBucket
     Properties: 
       ServiceToken: !GetAtt EmptyBucketLambda.Arn
+      CreateNewBucket: !Ref CreateNewBucket
       BucketName: !If 
        - CreateNewBucketCondition
        - !Ref Bucket
