@@ -1,4 +1,5 @@
 ---
+# Copyright 2023-2024 The MathWorks, Inc.
 AWSTemplateFormatVersion: '2010-09-09'
 
 Transform: AWS::LanguageExtensions
@@ -124,7 +125,7 @@ Resources:
               - sts:AssumeRole
       Path: /
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
         - PolicyName: empty-bucket-core
           PolicyDocument:
