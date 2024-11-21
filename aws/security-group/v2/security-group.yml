@@ -1,0 +1,231 @@
+---
+# Copyright 2023-2024 The MathWorks, Inc.
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::LanguageExtensions'
+Description: >
+  MathWorks Reference Architectures Template Security Group: Creates a security group to control the inbound and outbound traffic for the resources deployed in AWS. Version: v2.0.0
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Network configuration
+        Parameters:
+          - VpcId
+          - CidrRanges
+      - Label:
+          default: Access type to provide
+        Parameters:
+          - SSHAccess
+          - RDPAccess
+          - HTTPSAccess
+          - NICEDCVAccess
+          - MATLABProxyAccess
+          - MJSAccess
+          - LicenseManagerAccess
+          - InternalAccess
+
+    ParameterLabels:
+      VpcId:
+        default: VPC ID
+      CidrRanges:
+        default: IPv4 address ranges
+      SSHAccess:
+        default: SSH
+      RDPAccess:
+        default: RDP
+      HTTPSAccess:
+        default: HTTPS
+      NICEDCVAccess:
+        default: NICE DCV
+      MATLABProxyAccess:
+        default: matlab-proxy
+      MJSAccess:
+        default: MATLAB Job Scheduler
+      LicenseManagerAccess:
+        default: License Manager
+      InternalAccess:
+        default: Internal
+
+Parameters:
+  VpcId:
+    Type: 'AWS::EC2::VPC::Id'
+    Description: VPC for which to create the security group
+  CidrRanges:
+    Type: CommaDelimitedList
+    Description: List of address blocks to allow traffic from
+  SSHAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  RDPAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  HTTPSAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  NICEDCVAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  MATLABProxyAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  MJSAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  LicenseManagerAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+  InternalAccess:
+    Type: String
+    AllowedValues: ['Yes', 'No']
+    Default: 'No'
+    Description: Allow all traffic inside the security group
+
+Conditions:
+  AllowSSH:           !Equals [!Ref SSHAccess,            'Yes']
+  AllowRDP:           !Equals [!Ref RDPAccess,            'Yes']
+  AllowHTTPS:         !Equals [!Ref HTTPSAccess,          'Yes']
+  AllowNICEDCV:       !Equals [!Ref NICEDCVAccess,        'Yes']
+  AllowMATLABProxy:   !Equals [!Ref MATLABProxyAccess,    'Yes']
+  AllowMJS:           !Equals [!Ref MJSAccess,            'Yes']
+  AllowLM:            !Equals [!Ref LicenseManagerAccess, 'Yes']
+  AllowInternal:      !Equals [!Ref InternalAccess,       'Yes']
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: Control access from local clients
+
+  'Fn::ForEach::SSHIngressRule':
+    - Cidr
+    - !Ref CidrRanges
+    - 'SSHIngressRuleFor&{Cidr}':
+        Type: 'AWS::EC2::SecurityGroupIngress'
+        Condition: AllowSSH
+        Properties:
+          GroupId: !Ref SecurityGroup
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref Cidr
+          IpProtocol: tcp
+          Description: !Sub 
+            - 'Allow SSH traffic from ${Cidr}'
+            - Cidr: !Ref Cidr
+
+  'Fn::ForEach::RDPIngressRule':
+    - Cidr
+    - !Ref CidrRanges
+    - 'RDPIngressRuleFor&{Cidr}':
+        Type: 'AWS::EC2::SecurityGroupIngress'
+        Condition: AllowRDP
+        Properties:
+          GroupId: !Ref SecurityGroup
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: !Ref Cidr
+          IpProtocol: tcp
+          Description: !Sub 
+            - 'Allow RDP traffic from ${Cidr}'
+            - Cidr: !Ref Cidr
+
+  'Fn::ForEach::HTTPSIngressRule':
+    - Cidr
+    - !Ref CidrRanges
+    - 'HTTPSIngressRuleFor&{Cidr}':
+        Type: 'AWS::EC2::SecurityGroupIngress'
+        Condition: AllowHTTPS
+        Properties:
+          GroupId: !Ref SecurityGroup
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref Cidr
+          IpProtocol: tcp
+          Description: !Sub 
+            - 'Allow HTTPS traffic from ${Cidr}'
+            - Cidr: !Ref Cidr
+
+  'Fn::ForEach::NICEDCVIngressRule':
+    - Cidr
+    - !Ref CidrRanges
+    - 'NICEDCVIngressRuleFor&{Cidr}':
+        Type: 'AWS::EC2::SecurityGroupIngress'
+        Condition: AllowNICEDCV
+        Properties:
+          GroupId: !Ref SecurityGroup
+          FromPort: 8443
+          ToPort: 8443
+          CidrIp: !Ref Cidr
+          IpProtocol: tcp
+          Description: !Sub 
+            - 'Allow NICE DCV traffic from ${Cidr}'
+            - Cidr: !Ref Cidr
+
+  'Fn::ForEach::MATLABProxyIngressRule':
+    - Cidr
+    - !Ref CidrRanges
+    - 'MATLABProxyIngressRuleFor&{Cidr}':
+        Type: 'AWS::EC2::SecurityGroupIngress'
+        Condition: AllowMATLABProxy
+        Properties:
+          GroupId: !Ref SecurityGroup
+          FromPort: 8123
+          ToPort: 8123
+          CidrIp: !Ref Cidr
+          IpProtocol: tcp
+          Description: !Sub 
+            - 'Allow matlab-proxy traffic from ${Cidr}'
+            - Cidr: !Ref Cidr
+
+  'Fn::ForEach::MJSIngressRule':
+    - Cidr
+    - !Ref CidrRanges
+    - 'MJSIngressRuleFor&{Cidr}':
+        Type: 'AWS::EC2::SecurityGroupIngress'
+        Condition: AllowMJS
+        Properties:
+          GroupId: !Ref SecurityGroup
+          FromPort: 27350
+          ToPort: 27613
+          CidrIp: !Ref Cidr
+          IpProtocol: tcp
+          Description: !Sub 
+            - 'Allow MATLAB Job Scheduler traffic from ${Cidr}'
+            - Cidr: !Ref Cidr
+
+  'Fn::ForEach::LMIngressRule':
+    - Cidr
+    - !Ref CidrRanges
+    - 'LMIngressRuleFor&{Cidr}':
+        Type: 'AWS::EC2::SecurityGroupIngress'
+        Condition: AllowLM
+        Properties:
+          GroupId: !Ref SecurityGroup
+          FromPort: 27000
+          ToPort: 27010
+          CidrIp: !Ref Cidr
+          IpProtocol: tcp
+          Description: !Sub 
+            - 'Allow License Manager traffic from ${Cidr}'
+            - Cidr: !Ref Cidr
+          
+  InternalAccessRule:
+    Type: 'AWS::EC2::SecurityGroupIngress'
+    Condition: AllowInternal
+    Properties:
+      GroupId: !Ref SecurityGroup
+      SourceSecurityGroupId: !Ref SecurityGroup
+      IpProtocol: '-1'
+      Description: Allow internal traffic
+
+Outputs:
+  SecurityGroupId:
+    Value: !Ref SecurityGroup
