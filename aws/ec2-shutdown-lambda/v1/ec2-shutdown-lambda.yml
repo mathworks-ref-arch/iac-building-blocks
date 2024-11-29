@@ -136,7 +136,6 @@ Resources:
                   - logs:PutLogEvents
                 Resource:
                   - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*EC2ShutdownLambda*
-                  - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*EC2ShutdownLambda*:log-stream:*
 
   EC2ShutdownLambda:
     Type: AWS::Lambda::Function
