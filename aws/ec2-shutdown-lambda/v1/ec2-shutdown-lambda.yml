@@ -126,11 +126,6 @@ Resources:
                       - !Ref MathWorksProductId
               - Effect: Allow
                 Action:
-                  - ec2:DescribeTags
-                Resource:
-                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
-              - Effect: Allow
-                Action:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
