@@ -92,6 +92,7 @@ Parameters:
     Description: Allow all traffic inside the security group
   EndPortForMJSAccess:
     Type: Number
+    Default: 27365
     Description: Port up to which MATLAB client traffic is allowed from CidrRanges for cluster access. See https://github.com/mathworks-ref-arch/matlab-parallel-server-on-aws for more details.
 
 Conditions:
