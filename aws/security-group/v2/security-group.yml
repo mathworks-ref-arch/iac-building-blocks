@@ -1,9 +1,9 @@
 ---
-# Copyright 2023-2024 The MathWorks, Inc.
+# Copyright 2023-2025 The MathWorks, Inc.
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::LanguageExtensions'
 Description: >
-  MathWorks Reference Architectures Template Security Group: Creates a security group to control the inbound and outbound traffic for the resources deployed in AWS. Version: v2.0.0
+  MathWorks Reference Architectures Template Security Group: Creates a security group to control the inbound and outbound traffic for the resources deployed in AWS. Version: v2.1.0
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -13,6 +13,7 @@ Metadata:
         Parameters:
           - VpcId
           - CidrRanges
+          - EndPortForMJSAccess
       - Label:
           default: Access type to provide
         Parameters:
@@ -46,6 +47,8 @@ Metadata:
         default: License Manager
       InternalAccess:
         default: Internal
+      EndPortForMJSAccess:
+        default: End port for MJS access
 
 Parameters:
   VpcId:
@@ -87,6 +90,10 @@ Parameters:
     AllowedValues: ['Yes', 'No']
     Default: 'No'
     Description: Allow all traffic inside the security group
+  EndPortForMJSAccess:
+    Type: Number
+    Default: 27365
+    Description: Port up to which MATLAB client traffic is allowed from CidrRanges for cluster access. See https://github.com/mathworks-ref-arch/matlab-parallel-server-on-aws for more details.
 
 Conditions:
   AllowSSH:           !Equals [!Ref SSHAccess,            'Yes']
@@ -194,7 +201,7 @@ Resources:
         Properties:
           GroupId: !Ref SecurityGroup
           FromPort: 27350
-          ToPort: 27613
+          ToPort: !Ref EndPortForMJSAccess
           CidrIp: !Ref Cidr
           IpProtocol: tcp
           Description: !Sub 
