@@ -28,7 +28,7 @@ Parameters:
 
   PreSnapshotCommand:
     Type: String
-    Description: Optional SSM command to run before snapshot creation. Ensure your command can be executed in 60 seconds or less; otherwise, your command might time out, and the snapshot will be created without running the command. The command must be in the valid format '{{DocumentName}} COMMAND'. DocumentName must be either 'AWS-RunShellScript' or 'AWS-RunPowerShellScript'.
+    Description: Optional SSM command to run before snapshot creation. Ensure that the EC2 instance is running and that your command can be executed in 60 seconds or less; otherwise, the snapshot will be created without running the command. The command must be in the valid format '{{DocumentName}} COMMAND'. DocumentName must be either 'AWS-RunShellScript' or 'AWS-RunPowerShellScript'.
     Default: ""
 
   CustomExecutionRoleArn:
@@ -84,7 +84,7 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource:
-                  - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*MWSnapshotCreationFunction*
+                  - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
               - !If 
                 - HasSSMCommand
                 - Sid: SSMPermissions
@@ -133,9 +133,17 @@ Resources:
                     product_id = event['ResourceProperties']['ProductId']
                     tags_str = event['ResourceProperties'].get('Tags', '')
 
-                    optional_ssm_command = event['ResourceProperties'].get('PreSnapshotCommand', '')
-                    _handle_optional_ssm_command(ec2_instance_id, optional_ssm_command)
-                    
+                    ec2 = boto3.client('ec2')
+                    resp = ec2.describe_instances(InstanceIds=[ec2_instance_id])
+                    state = resp['Reservations'][0]['Instances'][0]['State']['Name']
+                    logger.info(f"EC2 instance {ec2_instance_id} is in state: {state}")
+
+                    if state == 'running':
+                        optional_ssm_command = event['ResourceProperties'].get('PreSnapshotCommand', '')
+                        _handle_optional_ssm_command(ec2_instance_id, optional_ssm_command)
+                    else:
+                        logger.info(f"Skipped SSM command for EC2 instance {ec2_instance_id} in state: {state}")    
+
                     snapshot_id = _create_snapshot(ec2_instance_id, volume_device_name, product_id, tags_str)
                     message = f"Snapshot created successfully. Snapshot ID: {snapshot_id}"
                     logger.info(message)
