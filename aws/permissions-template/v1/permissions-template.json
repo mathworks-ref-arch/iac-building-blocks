@@ -1,0 +1,1852 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "CloudFormation template for enabling MathWorks products for your users on AWS.",
+    "Parameters": {
+        "ResourceNamingPrefix": {
+            "Type": "String",
+            "Description": "Prefix to restrict users to create CloudFormation stacks or resources with names starting with this value. Use up to 10 lowercase letters or hyphens. Useful for isolating resources by team (for example, 'engr-', 'mrkt-').",
+            "MinLength": 1,
+            "MaxLength": 10,
+            "AllowedPattern": "^[a-z][a-z-]*$",
+            "ConstraintDescription": "'Resource naming prefix' must start with a lowercase letter, include only lowercase letters and hyphens, and be 1-10 characters long."
+        },
+        "AdditionalIamPolicy": {
+            "Description": "(Optional) Specify up to five valid IAM policy ARNs (AWS-managed or customer-managed) to grant additional permissions to your users' EC2 instances. These policies must have a path equal to '/MW/' and a name starting with the value in 'Resource Naming Prefix'. Applicable only when you configure 'User Permission Level' to 'Pass Role Workflow'. Users with 'Full Stack Creation' permissions can directly pass IAM policy ARNs during stack deployment.",
+            "Default": "",
+            "Type": "String",
+            "AllowedPattern": "^$|^(arn:(aws|aws-us-gov|aws-cn):iam::aws:policy(/[^/]+)*/[^/]+)(,arn:(aws|aws-us-gov|aws-cn):iam::aws:policy(/[^/]+)*/[^/]+){0,4}$",
+            "ConstraintDescription": "Must be an empty string or a valid IAM policy ARN."
+        },
+        "ExistingIAMUsersToExtend": {
+            "Description": "(Optional) Comma-separated list of existing IAM users to extend permissions to.",
+            "Default": "",
+            "Type": "String"
+        },
+        "ExistingIAMGroupsToExtend": {
+            "Description": "(Optional) Comma-separated list of existing IAM groups to extend permissions to. Applies to all members in these groups.",
+            "Default": "",
+            "Type": "String"
+        },
+        "ExistingIAMRolesToExtend": {
+            "Description": "(Optional) Comma-separated list of existing IAM roles to extend permissions to. For example, specify existing IAM roles assumed by users to extend their permissions to allow users to deploy MathWorks' Reference Architecture.",
+            "Default": "",
+            "Type": "String"
+        },
+        "UserPermissionLevel": {
+            "Type": "String",
+            "Default": "Full Stack Creation Workflow - Users cannot create IAM Roles, but their stacks can create all resources.",
+            "Description": "Choose 'Full Stack Creation' or 'Pass Role' workflows. 'Full Stack Creation' allows users to create the entire stack, including IAM roles, while following the principle of least privilege. Recommended for streamlined setups. 'Pass Role Workflow' limits users to resource creation only. Suitable for tighter control over IAM roles and permissions.",
+            "AllowedValues": [
+                "Full Stack Creation Workflow - Users cannot create IAM Roles, but their stacks can create all resources.",
+                "Pass Role Workflow - User's stack cannot create IAM roles. Admin creates IAM roles that users can pass while deploying their stacks."
+            ]
+        },
+        "EnableMatlab": {
+            "Type": "String",
+            "Default": "No",
+            "Description": "Select yes to allow your users to deploy MATLAB.",
+            "AllowedValues": [
+                "Yes",
+                "No"
+            ]
+        },
+        "SAMLFederatedIdentityProvider": {
+            "Type": "String",
+            "Default": "",
+            "Description": "(Optional) Specify the SAML Federated Identity Provider ARN to assume the provisioning role. If specified, you must also provide the 'SAML audience URL' parameter. Leave blank if you are not using SAML federation for user authentication."
+        },
+        "SAMLAudienceUrl": {
+            "Type": "String",
+            "Default": "",
+            "Description": "(Optional) If specified, you must also provide the 'SAMLFederatedIdentityProvider'. Leave blank if you are not using SAML federation for user authentication."
+        },
+        "AWSPrincipalArn": {
+            "Type": "String",
+            "Default": "",
+            "Description": "(Optional) Specify an AWS principal ARN to assume the IAM role created by this stack. If your AWS Principal is not supported by this template, you can temporarily use '*'. In this case, after deployment, update the IAM role's trust relationship to your custom AWS Principal in the IAM Console."
+        },
+        "AWSPrincipalExternalId": {
+            "NoEcho": "true",
+            "Type": "String",
+            "Default": "",
+            "Description": "(Optional) A unique identifier to allow third-party access to your AWS resources. This ensures that only trusted parties can assume roles in your account. For more information, see https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_common-scenarios_third-party.html."
+        },
+        "AWSRegion": {
+            "Type": "String",
+            "Default": "*",
+            "Description": "(Required) Allowed AWS Region to deploy resources. Select '*' for all regions.",
+            "AllowedValues": [
+                "*",
+                "us-east-1",
+                "us-east-2",
+                "us-west-1",
+                "us-west-2",
+                "ca-central-1",
+                "eu-central-1",
+                "eu-west-1",
+                "eu-west-2",
+                "eu-west-3",
+                "eu-north-1",
+                "sa-east-1",
+                "me-south-1",
+                "ap-east-1",
+                "ap-south-1",
+                "ap-northeast-1",
+                "ap-northeast-2",
+                "ap-southeast-1",
+                "ap-southeast-2"
+            ]
+        }
+    },
+    "Conditions": {
+        "AllowFullUserAccess": {
+            "Fn::Equals": [
+                {
+                    "Ref": "UserPermissionLevel"
+                },
+                "Full Stack Creation Workflow - Users cannot create IAM Roles, but their stacks can create all resources."
+            ]
+        },
+        "DenyFullUserAccess": {
+            "Fn::Not": [
+                {
+                    "Condition": "AllowFullUserAccess"
+                }
+            ]
+        },
+        "HasAdditionalIAMPolicy": {
+            "Fn::Not": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "AdditionalIamPolicy"
+                        },
+                        ""
+                    ]
+                }
+            ]
+        },
+        "IsExtendingPermissionsForExistingRoles": {
+            "Fn::Not": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "ExistingIAMRolesToExtend"
+                        },
+                        ""
+                    ]
+                }
+            ]
+        },
+        "IsExtendingPermissionsForExistingUsers": {
+            "Fn::Not": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "ExistingIAMUsersToExtend"
+                        },
+                        ""
+                    ]
+                }
+            ]
+        },
+        "IsExtendingPermissionsForExistingGroups": {
+            "Fn::Not": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "ExistingIAMGroupsToExtend"
+                        },
+                        ""
+                    ]
+                }
+            ]
+        },
+        "IsMatlabEnabled": {
+            "Fn::Equals": [
+                {
+                    "Ref": "EnableMatlab"
+                },
+                "Yes"
+            ]
+        },
+        "PassRolePermissionMatlab": {
+            "Fn::And": [
+                {
+                    "Condition": "DenyFullUserAccess"
+                },
+                {
+                    "Condition": "IsMatlabEnabled"
+                }
+            ]
+        },
+        "SAMLEnabled": {
+            "Fn::And": [
+                {
+                    "Fn::Not": [
+                        {
+                            "Fn::Equals": [
+                                {
+                                    "Ref": "SAMLFederatedIdentityProvider"
+                                },
+                                ""
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "Fn::Not": [
+                        {
+                            "Fn::Equals": [
+                                {
+                                    "Ref": "SAMLAudienceUrl"
+                                },
+                                ""
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        "IsAWSPrincipalSpecified": {
+            "Fn::Not": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "AWSPrincipalArn"
+                        },
+                        ""
+                    ]
+                }
+            ]
+        },
+        "IsAWSPrincipalExternalIdSpecified": {
+            "Fn::Not": [
+                {
+                    "Fn::Equals": [
+                        {
+                            "Ref": "AWSPrincipalExternalId"
+                        },
+                        ""
+                    ]
+                }
+            ]
+        },
+        "CreateNewRole": {
+            "Fn::Or": [
+                {
+                    "Condition": "SAMLEnabled"
+                },
+                {
+                    "Condition": "IsAWSPrincipalSpecified"
+                }
+            ]
+        },
+        "CreateNewFullAccessIamRole": {
+            "Fn::And": [
+                {
+                    "Condition": "CreateNewRole"
+                },
+                {
+                    "Condition": "AllowFullUserAccess"
+                }
+            ]
+        },
+        "CreateNewPassRoleIamRole": {
+            "Fn::And": [
+                {
+                    "Condition": "CreateNewRole"
+                },
+                {
+                    "Condition": "DenyFullUserAccess"
+                }
+            ]
+        }
+    },
+    "Resources": {
+        "UserProvisioningFullRole": {
+            "Type": "AWS::IAM::Role",
+            "Condition": "CreateNewFullAccessIamRole",
+            "Properties": {
+                "Path": "/MW/",
+                "RoleName": {
+                    "Fn::Sub": "${ResourceNamingPrefix}-UserProvisioningFullRole"
+                },
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Fn::If": [
+                                "SAMLEnabled",
+                                {
+                                    "Effect": "Allow",
+                                    "Principal": {
+                                        "Federated": {
+                                            "Ref": "SAMLFederatedIdentityProvider"
+                                        }
+                                    },
+                                    "Action": "sts:AssumeRoleWithSAML",
+                                    "Condition": {
+                                        "StringEquals": {
+                                            "SAML:aud": {
+                                                "Ref": "SAMLAudienceUrl"
+                                            }
+                                        }
+                                    }
+                                },
+                                {
+                                    "Ref": "AWS::NoValue"
+                                }
+                            ]
+                        },
+                        {
+                            "Fn::If": [
+                                "IsAWSPrincipalSpecified",
+                                {
+                                    "Effect": "Allow",
+                                    "Principal": {
+                                        "AWS": {
+                                            "Ref": "AWSPrincipalArn"
+                                        }
+                                    },
+                                    "Action": "sts:AssumeRole",
+                                    "Condition": {
+                                        "Fn::If": [
+                                            "IsAWSPrincipalExternalIdSpecified",
+                                            {
+                                                "StringEquals": {
+                                                    "sts:ExternalId": {
+                                                        "Ref": "AWSPrincipalExternalId"
+                                                    }
+                                                }
+                                            },
+                                            {
+                                                "Ref": "AWS::NoValue"
+                                            }
+                                        ]
+                                    }
+                                },
+                                {
+                                    "Ref": "AWS::NoValue"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "ManagedPolicyArns": [
+                    {
+                        "Fn::If": [
+                            "AllowFullUserAccess",
+                            {
+                                "Ref": "FullProvisioningPolicy"
+                            },
+                            {
+                                "Ref": "AWS::NoValue"
+                            }
+                        ]
+                    },
+                    {
+                        "Fn::If": [
+                            "IsMatlabEnabled",
+                            {
+                                "Ref": "MatlabLinuxProvisioningPolicyPassRole"
+                            },
+                            {
+                                "Ref": "AWS::NoValue"
+                            }
+                        ]
+                    },
+                    {
+                        "Fn::If": [
+                            "IsMatlabEnabled",
+                            {
+                                "Ref": "MatlabWindowsProvisioningPolicyPassRole"
+                            },
+                            {
+                                "Ref": "AWS::NoValue"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "UserProvisioningPassRoleRole": {
+            "Type": "AWS::IAM::Role",
+            "Condition": "CreateNewPassRoleIamRole",
+            "Properties": {
+                "Path": "/MW/",
+                "RoleName": {
+                    "Fn::Sub": "${ResourceNamingPrefix}-UserProvisioningPassRoleRole"
+                },
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Fn::If": [
+                                "SAMLEnabled",
+                                {
+                                    "Effect": "Allow",
+                                    "Principal": {
+                                        "Federated": {
+                                            "Ref": "SAMLFederatedIdentityProvider"
+                                        }
+                                    },
+                                    "Action": "sts:AssumeRoleWithSAML",
+                                    "Condition": {
+                                        "StringEquals": {
+                                            "SAML:aud": {
+                                                "Ref": "SAMLAudienceUrl"
+                                            }
+                                        }
+                                    }
+                                },
+                                {
+                                    "Ref": "AWS::NoValue"
+                                }
+                            ]
+                        },
+                        {
+                            "Fn::If": [
+                                "IsAWSPrincipalSpecified",
+                                {
+                                    "Effect": "Allow",
+                                    "Principal": {
+                                        "AWS": {
+                                            "Ref": "AWSPrincipalArn"
+                                        }
+                                    },
+                                    "Action": "sts:AssumeRole",
+                                    "Condition": {
+                                        "Fn::If": [
+                                            "IsAWSPrincipalExternalIdSpecified",
+                                            {
+                                                "StringEquals": {
+                                                    "sts:ExternalId": {
+                                                        "Ref": "AWSPrincipalExternalId"
+                                                    }
+                                                }
+                                            },
+                                            {
+                                                "Ref": "AWS::NoValue"
+                                            }
+                                        ]
+                                    }
+                                },
+                                {
+                                    "Ref": "AWS::NoValue"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "ManagedPolicyArns": [
+                    {
+                        "Fn::If": [
+                            "IsMatlabEnabled",
+                            {
+                                "Ref": "MatlabLinuxProvisioningPolicyPassRole"
+                            },
+                            {
+                                "Ref": "AWS::NoValue"
+                            }
+                        ]
+                    },
+                    {
+                        "Fn::If": [
+                            "IsMatlabEnabled",
+                            {
+                                "Ref": "MatlabWindowsProvisioningPolicyPassRole"
+                            },
+                            {
+                                "Ref": "AWS::NoValue"
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "CommonExecutionRole": {
+            "Type": "AWS::IAM::Role",
+            "Condition": "DenyFullUserAccess",
+            "Properties": {
+                "Path": "/MW/",
+                "RoleName": {
+                    "Fn::Sub": "${ResourceNamingPrefix}-ExecutionRole"
+                },
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": {
+                                    "Fn::Sub": "ec2.${AWS::URLSuffix}"
+                                }
+                            },
+                            "Action": "sts:AssumeRole"
+                        },
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": {
+                                    "Fn::Sub": "lambda.${AWS::URLSuffix}"
+                                }
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "ManagedPolicyArns": {
+                    "Fn::If": [
+                        "HasAdditionalIAMPolicy",
+                        {
+                            "Fn::Split": [
+                                ",",
+                                {
+                                    "Ref": "AdditionalIamPolicy"
+                                }
+                            ]
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                }
+            }
+        },
+        "FullProvisioningPolicy": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Condition": "AllowFullUserAccess",
+            "Properties": {
+                "Description": "Managed provisioning policy allowing IAM write access from CloudFormation.",
+                "ManagedPolicyName": {
+                    "Fn::Sub": "${ResourceNamingPrefix}-WriteIAMActionsFromCloudFormation"
+                },
+                "Path": "/MW/",
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "IamWriteActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "iam:AttachRolePolicy",
+                                "iam:CreateRole",
+                                "iam:DeleteRole",
+                                "iam:DeleteRolePolicy",
+                                "iam:DetachRolePolicy",
+                                "iam:PutRolePolicy",
+                                "iam:TagRole"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/MW/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "Roles": {
+                    "Fn::If": [
+                        "IsExtendingPermissionsForExistingRoles",
+                        {
+                            "Fn::Split": [
+                                ",",
+                                {
+                                    "Ref": "ExistingIAMRolesToExtend"
+                                }
+                            ]
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                },
+                "Groups": {
+                    "Fn::If": [
+                        "IsExtendingPermissionsForExistingGroups",
+                        {
+                            "Fn::Split": [
+                                ",",
+                                {
+                                    "Ref": "ExistingIAMGroupsToExtend"
+                                }
+                            ]
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                },
+                "Users": {
+                    "Fn::If": [
+                        "IsExtendingPermissionsForExistingUsers",
+                        {
+                            "Fn::Split": [
+                                ",",
+                                {
+                                    "Ref": "ExistingIAMUsersToExtend"
+                                }
+                            ]
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                }
+            }
+        },
+        "MatlabLinuxProvisioningPolicyPassRole": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Condition": "IsMatlabEnabled",
+            "Properties": {
+                "Description": "Managed provisioning policy for Matlab linux (PassRole Access)",
+                "ManagedPolicyName": {
+                    "Fn::Sub": "${ResourceNamingPrefix}MatlabLinuxProvisioningPolicyPassRole"
+                },
+                "Path": "/MW/",
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "CloudFormationCreate",
+                            "Effect": "Allow",
+                            "Action": "cloudformation:CreateStack",
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWSRegion}:${AWS::AccountId}:stack/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringLike": {
+                                    "cloudformation:TemplateUrl": [
+                                        "https://mathworks-reference-architectures-templates.s3.amazonaws.com/*",
+                                        "https://matlab-on-aws.s3.amazonaws.com/*"
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "CloudWatchLogsReadOnlyAccess",
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:DescribeLogStreams",
+                                "logs:GetLogEvents"
+                            ],
+                            "Resource": [
+                                {
+                                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:/aws/lambda/${ResourceNamingPrefix}*"
+                                },
+                                {
+                                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:${ResourceNamingPrefix}*"
+                                }
+                            ]
+                        },
+                        {
+                            "Sid": "CloudformationActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "cloudformation:DeleteStack",
+                                "cloudformation:DescribeStackEvents",
+                                "cloudformation:DescribeStacks"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWSRegion}:${AWS::AccountId}:stack/${ResourceNamingPrefix}*"
+                            }
+                        },
+                        {
+                            "Sid": "CloudformationActionsFromCloudFormation2",
+                            "Effect": "Allow",
+                            "Action": [
+                                "cloudformation:*ChangeSet*",
+                                "cloudformation:GetStackPolicy",
+                                "cloudformation:GetTemplate",
+                                "cloudformation:GetTemplateSummary",
+                                "cloudformation:ListStackResources"
+                            ],
+                            "Resource": [
+                                {
+                                    "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWSRegion}:${AWS::AccountId}:stack/${ResourceNamingPrefix}*"
+                                },
+                                {
+                                    "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWSRegion}:aws:transform/*"
+                                }
+                            ]
+                        },
+                        {
+                            "Sid": "EC2KeyPairWriteAccess",
+                            "Effect": "Allow",
+                            "Action": [
+                                "ec2:CreateKeyPair",
+                                "ec2:DeleteKeyPair"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWSRegion}:${AWS::AccountId}:key-pair/${ResourceNamingPrefix}*"
+                            }
+                        },
+                        {
+                            "Sid": "EC2StopStart",
+                            "Effect": "Allow",
+                            "Action": [
+                                "ec2:StartInstances",
+                                "ec2:StopInstances"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWSRegion}:${AWS::AccountId}:instance/*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:ResourceTag/mw-ProductID": "MathWorks-MATLAB-Linux"
+                                },
+                                "StringLike": {
+                                    "aws:ResourceTag/mw-StackName": {
+                                        "Fn::Sub": "${ResourceNamingPrefix}*"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "EventsActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "events:DeleteRule",
+                                "events:DescribeRule",
+                                "events:ListTargetsByRule",
+                                "events:PutRule",
+                                "events:PutTargets",
+                                "events:RemoveTargets"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:events:${AWSRegion}:${AWS::AccountId}:rule/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "IamActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "iam:GetRole",
+                                "iam:GetRolePolicy",
+                                "iam:ListAttachedRolePolicies",
+                                "iam:ListRolePolicies",
+                                "iam:PassRole"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/MW/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "IamActionsFromCloudFormation2",
+                            "Effect": "Allow",
+                            "Action": [
+                                "iam:AddRoleToInstanceProfile",
+                                "iam:CreateInstanceProfile",
+                                "iam:DeleteInstanceProfile",
+                                "iam:GetInstanceProfile",
+                                "iam:RemoveRoleFromInstanceProfile"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/MW/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "LambdaActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "lambda:AddPermission",
+                                "lambda:CreateFunction",
+                                "lambda:DeleteFunction",
+                                "lambda:GetFunction",
+                                "lambda:GetFunctionCodeSigningConfig",
+                                "lambda:GetFunctionRecursionConfig",
+                                "lambda:GetPolicy",
+                                "lambda:GetRuntimeManagementConfig",
+                                "lambda:InvokeFunction",
+                                "lambda:RemovePermission",
+                                "lambda:TagResource"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:lambda:${AWSRegion}:${AWS::AccountId}:function:${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "LogsActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:CreateLogGroup",
+                                "logs:DeleteLogGroup"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "LogsActionsFromCloudFormation2",
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:CreateLogGroup",
+                                "logs:DeleteLogGroup",
+                                "logs:PutRetentionPolicy"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:/aws/lambda/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "MultipleServicesActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "ec2:AllocateAddress",
+                                "ec2:AssociateAddress",
+                                "ec2:AuthorizeSecurityGroupIngress",
+                                "ec2:CreateSecurityGroup",
+                                "ec2:CreateTags",
+                                "ec2:DeleteSecurityGroup",
+                                "ec2:DescribeAddresses",
+                                "ec2:DescribeInstanceAttribute",
+                                "ec2:DescribeInstanceCreditSpecifications",
+                                "ec2:DescribeInstances",
+                                "ec2:DescribeKeyPairs",
+                                "ec2:DescribeNetworkInterfaces",
+                                "ec2:DescribeSecurityGroupRules",
+                                "ec2:DescribeSecurityGroups",
+                                "ec2:DescribeSubnets",
+                                "ec2:DescribeVolumes",
+                                "ec2:DescribeVpcs",
+                                "ec2:DisassociateAddress",
+                                "ec2:ReleaseAddress",
+                                "ec2:RevokeSecurityGroupIngress",
+                                "ec2:RunInstances",
+                                "ec2:TerminateInstances",
+                                "logs:DescribeIndexPolicies",
+                                "logs:DescribeLogGroups",
+                                "logs:DescribeResourcePolicies",
+                                "logs:ListTagsForResource",
+                                "ssm:ListAssociations",
+                                "ssm:ListTagsForResource"
+                            ],
+                            "Resource": "*",
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "ReadOnlyActionsForSmoothConsoleExperience",
+                            "Effect": "Allow",
+                            "Action": [
+                                "cloudformation:GetTemplateSummary",
+                                "cloudformation:ListStacks",
+                                "ec2:DescribeInstances",
+                                "ec2:DescribeKeyPairs",
+                                "ec2:DescribeSubnets",
+                                "ec2:DescribeVpcs",
+                                "logs:DescribeLogGroups",
+                                "ssm:DescribeInstanceInformation",
+                                "ssm:GetConnectionStatus"
+                            ],
+                            "Resource": "*"
+                        },
+                        {
+                            "Sid": "SsmActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "ssm:AddTagsToResource",
+                                "ssm:CreateDocument",
+                                "ssm:DeleteDocument",
+                                "ssm:DescribeDocument",
+                                "ssm:GetDocument"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWSRegion}:${AWS::AccountId}:document/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "Roles": {
+                    "Fn::If": [
+                        "IsExtendingPermissionsForExistingRoles",
+                        {
+                            "Fn::Split": [
+                                ",",
+                                {
+                                    "Ref": "ExistingIAMRolesToExtend"
+                                }
+                            ]
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                },
+                "Groups": {
+                    "Fn::If": [
+                        "IsExtendingPermissionsForExistingGroups",
+                        {
+                            "Fn::Split": [
+                                ",",
+                                {
+                                    "Ref": "ExistingIAMGroupsToExtend"
+                                }
+                            ]
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                },
+                "Users": {
+                    "Fn::If": [
+                        "IsExtendingPermissionsForExistingUsers",
+                        {
+                            "Fn::Split": [
+                                ",",
+                                {
+                                    "Ref": "ExistingIAMUsersToExtend"
+                                }
+                            ]
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                }
+            }
+        },
+        "MatlabLinuxExecutionPolicy": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Condition": "PassRolePermissionMatlab",
+            "Properties": {
+                "Description": "A managed execution policy for Matlab linux",
+                "ManagedPolicyName": {
+                    "Fn::Sub": "${ResourceNamingPrefix}MatlabLinuxExecutionPolicy"
+                },
+                "Path": "/MW/",
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:ResourceTag/mw-ProductID": "MathWorks-MATLAB-Linux"
+                                }
+                            },
+                            "Action": [
+                                "ec2:CreateTags",
+                                "ec2:DeleteTags",
+                                "ec2:StopInstances"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWSRegion}:${AWS::AccountId}:instance/*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "logs:CreateLogStream",
+                                "logs:DescribeLogStreams",
+                                "logs:PutLogEvents"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:${ResourceNamingPrefix}*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": "s3:GetObject",
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:s3:::dcv-license.${AWSRegion}/*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": "ec2:DescribeTags",
+                            "Resource": "*",
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "ssm:DescribeAssociation",
+                                "ssm:DescribeDocument",
+                                "ssm:GetDeployablePatchSnapshotForInstance",
+                                "ssm:GetDocument",
+                                "ssm:GetManifest",
+                                "ssm:GetParameter",
+                                "ssm:GetParameters",
+                                "ssm:ListAssociations",
+                                "ssm:ListInstanceAssociations",
+                                "ssm:PutComplianceItems",
+                                "ssm:PutConfigurePackageResult",
+                                "ssm:PutInventory",
+                                "ssm:UpdateAssociationStatus",
+                                "ssm:UpdateInstanceAssociationStatus",
+                                "ssm:UpdateInstanceInformation"
+                            ],
+                            "Resource": "*",
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "ssmmessages:CreateControlChannel",
+                                "ssmmessages:CreateDataChannel",
+                                "ssmmessages:OpenControlChannel",
+                                "ssmmessages:OpenDataChannel"
+                            ],
+                            "Resource": "*",
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "ec2messages:AcknowledgeMessage",
+                                "ec2messages:DeleteMessage",
+                                "ec2messages:FailMessage",
+                                "ec2messages:GetEndpoint",
+                                "ec2messages:GetMessages",
+                                "ec2messages:SendReply"
+                            ],
+                            "Resource": "*",
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": "ec2:DescribeInstances",
+                            "Resource": "*",
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": "ec2:DescribeTags",
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWSRegion}:${AWS::AccountId}:instance/*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "logs:CreateLogGroup",
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:/aws/lambda/*EC2ShutdownLambda*"
+                            },
+                            "Effect": "Allow"
+                        }
+                    ]
+                },
+                "Roles": [
+                    {
+                        "Ref": "CommonExecutionRole"
+                    }
+                ]
+            }
+        },
+        "MatlabWindowsProvisioningPolicyPassRole": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Condition": "IsMatlabEnabled",
+            "Properties": {
+                "Description": "Managed provisioning policy for Matlab windows (PassRole Access)",
+                "ManagedPolicyName": {
+                    "Fn::Sub": "${ResourceNamingPrefix}MatlabWindowsProvisioningPolicyPassRole"
+                },
+                "Path": "/MW/",
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "CloudFormationCreate",
+                            "Effect": "Allow",
+                            "Action": "cloudformation:CreateStack",
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWSRegion}:${AWS::AccountId}:stack/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringLike": {
+                                    "cloudformation:TemplateUrl": [
+                                        "https://mathworks-reference-architectures-templates.s3.amazonaws.com/*",
+                                        "https://matlab-on-aws-win.s3.amazonaws.com/*"
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "CloudWatchLogsReadOnlyAccess",
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:DescribeLogStreams",
+                                "logs:GetLogEvents"
+                            ],
+                            "Resource": [
+                                {
+                                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:/aws/lambda/${ResourceNamingPrefix}*"
+                                },
+                                {
+                                    "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:${ResourceNamingPrefix}*"
+                                }
+                            ]
+                        },
+                        {
+                            "Sid": "CloudformationActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "cloudformation:DeleteStack",
+                                "cloudformation:DescribeStackEvents",
+                                "cloudformation:DescribeStacks"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWSRegion}:${AWS::AccountId}:stack/${ResourceNamingPrefix}*"
+                            }
+                        },
+                        {
+                            "Sid": "CloudformationActionsFromCloudFormation2",
+                            "Effect": "Allow",
+                            "Action": [
+                                "cloudformation:*ChangeSet*",
+                                "cloudformation:GetStackPolicy",
+                                "cloudformation:GetTemplate",
+                                "cloudformation:GetTemplateSummary",
+                                "cloudformation:ListStackResources"
+                            ],
+                            "Resource": [
+                                {
+                                    "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWSRegion}:${AWS::AccountId}:stack/${ResourceNamingPrefix}*"
+                                },
+                                {
+                                    "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWSRegion}:aws:transform/*"
+                                }
+                            ]
+                        },
+                        {
+                            "Sid": "EC2KeyPairWriteAccess",
+                            "Effect": "Allow",
+                            "Action": [
+                                "ec2:CreateKeyPair",
+                                "ec2:DeleteKeyPair"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWSRegion}:${AWS::AccountId}:key-pair/${ResourceNamingPrefix}*"
+                            }
+                        },
+                        {
+                            "Sid": "EC2StopStart",
+                            "Effect": "Allow",
+                            "Action": [
+                                "ec2:StartInstances",
+                                "ec2:StopInstances"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWSRegion}:${AWS::AccountId}:instance/*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:ResourceTag/mw-ProductID": "MathWorks-MATLAB-Windows"
+                                },
+                                "StringLike": {
+                                    "aws:ResourceTag/mw-StackName": {
+                                        "Fn::Sub": "${ResourceNamingPrefix}*"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "EventsActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "events:DeleteRule",
+                                "events:DescribeRule",
+                                "events:ListTargetsByRule",
+                                "events:PutRule",
+                                "events:PutTargets",
+                                "events:RemoveTargets"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:events:${AWSRegion}:${AWS::AccountId}:rule/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "IamActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "iam:GetRole",
+                                "iam:GetRolePolicy",
+                                "iam:ListAttachedRolePolicies",
+                                "iam:ListRolePolicies",
+                                "iam:PassRole"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/MW/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "IamActionsFromCloudFormation2",
+                            "Effect": "Allow",
+                            "Action": [
+                                "iam:AddRoleToInstanceProfile",
+                                "iam:CreateInstanceProfile",
+                                "iam:DeleteInstanceProfile",
+                                "iam:GetInstanceProfile",
+                                "iam:RemoveRoleFromInstanceProfile"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/MW/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "LambdaActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "lambda:AddPermission",
+                                "lambda:CreateFunction",
+                                "lambda:DeleteFunction",
+                                "lambda:GetFunction",
+                                "lambda:GetFunctionCodeSigningConfig",
+                                "lambda:GetFunctionRecursionConfig",
+                                "lambda:GetPolicy",
+                                "lambda:GetRuntimeManagementConfig",
+                                "lambda:InvokeFunction",
+                                "lambda:RemovePermission",
+                                "lambda:TagResource"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:lambda:${AWSRegion}:${AWS::AccountId}:function:${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "LogsActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:CreateLogGroup",
+                                "logs:DeleteLogGroup"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "LogsActionsFromCloudFormation2",
+                            "Effect": "Allow",
+                            "Action": [
+                                "logs:CreateLogGroup",
+                                "logs:DeleteLogGroup",
+                                "logs:PutRetentionPolicy"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:/aws/lambda/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "MultipleServicesActionsFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": [
+                                "ec2:AllocateAddress",
+                                "ec2:AssociateAddress",
+                                "ec2:AuthorizeSecurityGroupIngress",
+                                "ec2:CreateSecurityGroup",
+                                "ec2:CreateTags",
+                                "ec2:DeleteSecurityGroup",
+                                "ec2:DescribeAddresses",
+                                "ec2:DescribeInstanceAttribute",
+                                "ec2:DescribeInstanceCreditSpecifications",
+                                "ec2:DescribeInstances",
+                                "ec2:DescribeKeyPairs",
+                                "ec2:DescribeNetworkInterfaces",
+                                "ec2:DescribeSecurityGroupRules",
+                                "ec2:DescribeSecurityGroups",
+                                "ec2:DescribeSubnets",
+                                "ec2:DescribeVolumes",
+                                "ec2:DescribeVpcs",
+                                "ec2:DisassociateAddress",
+                                "ec2:ReleaseAddress",
+                                "ec2:RevokeSecurityGroupIngress",
+                                "ec2:RunInstances",
+                                "ec2:TerminateInstances",
+                                "logs:DescribeIndexPolicies",
+                                "logs:DescribeLogGroups",
+                                "logs:DescribeResourcePolicies",
+                                "logs:ListTagsForResource",
+                                "ssm:ListAssociations"
+                            ],
+                            "Resource": "*",
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "Sid": "ReadOnlyActionsForSmoothConsoleExperience",
+                            "Effect": "Allow",
+                            "Action": [
+                                "cloudformation:GetTemplateSummary",
+                                "cloudformation:ListStacks",
+                                "ec2:DescribeInstances",
+                                "ec2:DescribeKeyPairs",
+                                "ec2:DescribeSubnets",
+                                "ec2:DescribeVpcs",
+                                "logs:DescribeLogGroups",
+                                "ssm:DescribeInstanceInformation",
+                                "ssm:GetConnectionStatus"
+                            ],
+                            "Resource": "*"
+                        },
+                        {
+                            "Sid": "SsmActionFromCloudFormation",
+                            "Effect": "Allow",
+                            "Action": "ssm:AddTagsToResource",
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWSRegion}:${AWS::AccountId}:document/${ResourceNamingPrefix}*"
+                            },
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:CalledViaFirst": {
+                                        "Fn::Sub": "cloudformation.${AWS::URLSuffix}"
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "Roles": {
+                    "Fn::If": [
+                        "IsExtendingPermissionsForExistingRoles",
+                        {
+                            "Fn::Split": [
+                                ",",
+                                {
+                                    "Ref": "ExistingIAMRolesToExtend"
+                                }
+                            ]
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                },
+                "Groups": {
+                    "Fn::If": [
+                        "IsExtendingPermissionsForExistingGroups",
+                        {
+                            "Fn::Split": [
+                                ",",
+                                {
+                                    "Ref": "ExistingIAMGroupsToExtend"
+                                }
+                            ]
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                },
+                "Users": {
+                    "Fn::If": [
+                        "IsExtendingPermissionsForExistingUsers",
+                        {
+                            "Fn::Split": [
+                                ",",
+                                {
+                                    "Ref": "ExistingIAMUsersToExtend"
+                                }
+                            ]
+                        },
+                        {
+                            "Ref": "AWS::NoValue"
+                        }
+                    ]
+                }
+            }
+        },
+        "MatlabWindowsExecutionPolicy": {
+            "Type": "AWS::IAM::ManagedPolicy",
+            "Condition": "PassRolePermissionMatlab",
+            "Properties": {
+                "Description": "A managed execution policy for Matlab windows",
+                "ManagedPolicyName": {
+                    "Fn::Sub": "${ResourceNamingPrefix}MatlabWindowsExecutionPolicy"
+                },
+                "Path": "/MW/",
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:ResourceTag/mw-ProductID": "MathWorks-MATLAB-Windows"
+                                },
+                                "StringLike": {
+                                    "aws:ResourceTag/mw-StackName": {
+                                        "Fn::Sub": "${ResourceNamingPrefix}*"
+                                    }
+                                }
+                            },
+                            "Action": "ec2:AssociateIamInstanceProfile",
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWSRegion}:${AWS::AccountId}:instance/*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Condition": {
+                                "StringEquals": {
+                                    "aws:ResourceTag/mw-ProductID": "MathWorks-MATLAB-Windows"
+                                }
+                            },
+                            "Action": [
+                                "ec2:CreateTags",
+                                "ec2:DeleteTags",
+                                "ec2:StopInstances"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWSRegion}:${AWS::AccountId}:instance/*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": "cloudformation:DescribeStackResource",
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:cloudformation:${AWSRegion}:${AWS::AccountId}:stack/${ResourceNamingPrefix}*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": "iam:PassRole",
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/MW/${ResourceNamingPrefix}*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "logs:CreateLogGroup",
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:/aws/lambda/*AttachInstanceProfileLambda*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "logs:CreateLogStream",
+                                "logs:DescribeLogStreams",
+                                "logs:PutLogEvents"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:${ResourceNamingPrefix}*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": "s3:GetObject",
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:s3:::dcv-license.${AWSRegion}/*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": "ec2:DescribeTags",
+                            "Resource": "*",
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "ssm:DescribeAssociation",
+                                "ssm:DescribeDocument",
+                                "ssm:GetDeployablePatchSnapshotForInstance",
+                                "ssm:GetDocument",
+                                "ssm:GetManifest",
+                                "ssm:GetParameter",
+                                "ssm:GetParameters",
+                                "ssm:ListAssociations",
+                                "ssm:ListInstanceAssociations",
+                                "ssm:PutComplianceItems",
+                                "ssm:PutConfigurePackageResult",
+                                "ssm:PutInventory",
+                                "ssm:UpdateAssociationStatus",
+                                "ssm:UpdateInstanceAssociationStatus",
+                                "ssm:UpdateInstanceInformation"
+                            ],
+                            "Resource": "*",
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "ssmmessages:CreateControlChannel",
+                                "ssmmessages:CreateDataChannel",
+                                "ssmmessages:OpenControlChannel",
+                                "ssmmessages:OpenDataChannel"
+                            ],
+                            "Resource": "*",
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "ec2messages:AcknowledgeMessage",
+                                "ec2messages:DeleteMessage",
+                                "ec2messages:FailMessage",
+                                "ec2messages:GetEndpoint",
+                                "ec2messages:GetMessages",
+                                "ec2messages:SendReply"
+                            ],
+                            "Resource": "*",
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": "ec2:DescribeInstances",
+                            "Resource": "*",
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": "ec2:DescribeTags",
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:ec2:${AWSRegion}:${AWS::AccountId}:instance/*"
+                            },
+                            "Effect": "Allow"
+                        },
+                        {
+                            "Action": [
+                                "logs:CreateLogGroup",
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents"
+                            ],
+                            "Resource": {
+                                "Fn::Sub": "arn:${AWS::Partition}:logs:${AWSRegion}:${AWS::AccountId}:log-group:/aws/lambda/*EC2ShutdownLambda*"
+                            },
+                            "Effect": "Allow"
+                        }
+                    ]
+                },
+                "Roles": [
+                    {
+                        "Ref": "CommonExecutionRole"
+                    }
+                ]
+            }
+        }
+    },
+    "Metadata": {
+        "AWS::CloudFormation::Interface": {
+            "ParameterGroups": [
+                {
+                    "Label": {
+                        "default": "Which MathWorks products do you want to allow your users to deploy?"
+                    },
+                    "Parameters": [
+                        "EnableMatlab"
+                    ]
+                },
+                {
+                    "Label": {
+                        "default": "What restrictions do you want to apply to the IAM policies?"
+                    },
+                    "Parameters": [
+                        "UserPermissionLevel",
+                        "AWSRegion",
+                        "ResourceNamingPrefix",
+                        "AdditionalIamPolicy"
+                    ]
+                },
+                {
+                    "Label": {
+                        "default": "Do you want to extend the permissions of the existing IAM roles, groups or users?"
+                    },
+                    "Parameters": [
+                        "ExistingIAMRolesToExtend",
+                        "ExistingIAMGroupsToExtend",
+                        "ExistingIAMUsersToExtend"
+                    ]
+                },
+                {
+                    "Label": {
+                        "default": "Create a new provisioning IAM role and specify who or what should be able to assume the role."
+                    },
+                    "Parameters": [
+                        "AWSPrincipalArn",
+                        "AWSPrincipalExternalId",
+                        "SAMLFederatedIdentityProvider",
+                        "SAMLAudienceUrl"
+                    ]
+                }
+            ],
+            "ParameterLabels": {
+                "SAMLFederatedIdentityProvider": {
+                    "default": "SAML federated identity provider ARN"
+                },
+                "SAMLAudienceUrl": {
+                    "default": "SAML audience URL"
+                },
+                "AWSPrincipalArn": {
+                    "default": "AWS principal ARN"
+                },
+                "AWSPrincipalExternalId": {
+                    "default": "AWS principal external ID"
+                },
+                "UserPermissionLevel": {
+                    "default": "User permission level"
+                },
+                "AWSRegion": {
+                    "default": "AWS Region restriction"
+                },
+                "ResourceNamingPrefix": {
+                    "default": "Resource naming prefix"
+                },
+                "AdditionalIamPolicy": {
+                    "default": "Additional IAM policies for Common Execution Role"
+                },
+                "ExistingIAMUsersToExtend": {
+                    "default": "IAM user names"
+                },
+                "ExistingIAMGroupsToExtend": {
+                    "default": "IAM group names"
+                },
+                "ExistingIAMRolesToExtend": {
+                    "default": "IAM role names"
+                },
+                "EnableMatlab": {
+                    "default": "Enable MATLAB deployment"
+                }
+            }
+        }
+    },
+    "Rules": {
+        "ValidateAdditionalIamPolicy": {
+            "RuleCondition": {
+                "Fn::Equals": [
+                    {
+                        "Ref": "UserPermissionLevel"
+                    },
+                    "Full Stack Creation Workflow - Users cannot create IAM Roles, but their stacks can create all resources."
+                ]
+            },
+            "Assertions": [
+                {
+                    "Assert": {
+                        "Fn::Equals": [
+                            {
+                                "Ref": "AdditionalIamPolicy"
+                            },
+                            ""
+                        ]
+                    },
+                    "AssertDescription": "AdditionalIamPolicy must be empty when user's permission is set to 'Full'. User with 'Full stack creation' permissions, will create execution IAM roles as part of their stack deployments."
+                }
+            ]
+        }
+    },
+    "Outputs": {
+        "CommonExecutionRoleName": {
+            "Description": "Name of the CommonExecutionRole resource. Only available for 'Pass Role' workflow.",
+            "Value": {
+                "Fn::If": [
+                    "DenyFullUserAccess",
+                    {
+                        "Ref": "CommonExecutionRole"
+                    },
+                    "--"
+                ]
+            }
+        },
+        "UserProvisioningFullRoleArn": {
+            "Description": "ARN of the UserProvisioningFullRole resource",
+            "Value": {
+                "Fn::If": [
+                    "CreateNewFullAccessIamRole",
+                    {
+                        "Fn::GetAtt": [
+                            "UserProvisioningFullRole",
+                            "Arn"
+                        ]
+                    },
+                    "--"
+                ]
+            }
+        },
+        "UserProvisioningPassRoleRoleArn": {
+            "Description": "ARN of the UserProvisioningPassRoleRole resource",
+            "Value": {
+                "Fn::If": [
+                    "CreateNewPassRoleIamRole",
+                    {
+                        "Fn::GetAtt": [
+                            "UserProvisioningPassRoleRole",
+                            "Arn"
+                        ]
+                    },
+                    "--"
+                ]
+            }
+        },
+        "CommonExecutionRoleArn": {
+            "Description": "ARN of the CommonExecutionRole resource",
+            "Value": {
+                "Fn::If": [
+                    "DenyFullUserAccess",
+                    {
+                        "Fn::GetAtt": [
+                            "CommonExecutionRole",
+                            "Arn"
+                        ]
+                    },
+                    "--"
+                ]
+            }
+        },
+        "FullProvisioningPolicyArn": {
+            "Description": "ARN of the FullProvisioningPolicy resource",
+            "Value": {
+                "Fn::If": [
+                    "AllowFullUserAccess",
+                    {
+                        "Ref": "FullProvisioningPolicy"
+                    },
+                    "--"
+                ]
+            }
+        },
+        "MatlabLinuxProvisioningPolicyPassRoleArn": {
+            "Description": "ARN of the MatlabLinuxProvisioningPolicyPassRole resource",
+            "Value": {
+                "Fn::If": [
+                    "IsMatlabEnabled",
+                    {
+                        "Ref": "MatlabLinuxProvisioningPolicyPassRole"
+                    },
+                    "--"
+                ]
+            }
+        },
+        "MatlabLinuxExecutionPolicyArn": {
+            "Description": "ARN of the MatlabLinuxExecutionPolicy resource",
+            "Value": {
+                "Fn::If": [
+                    "PassRolePermissionMatlab",
+                    {
+                        "Ref": "MatlabLinuxExecutionPolicy"
+                    },
+                    "--"
+                ]
+            }
+        },
+        "MatlabWindowsProvisioningPolicyPassRoleArn": {
+            "Description": "ARN of the MatlabWindowsProvisioningPolicyPassRole resource",
+            "Value": {
+                "Fn::If": [
+                    "IsMatlabEnabled",
+                    {
+                        "Ref": "MatlabWindowsProvisioningPolicyPassRole"
+                    },
+                    "--"
+                ]
+            }
+        },
+        "MatlabWindowsExecutionPolicyArn": {
+            "Description": "ARN of the MatlabWindowsExecutionPolicy resource",
+            "Value": {
+                "Fn::If": [
+                    "PassRolePermissionMatlab",
+                    {
+                        "Ref": "MatlabWindowsExecutionPolicy"
+                    },
+                    "--"
+                ]
+            }
+        }
+    }
+}
