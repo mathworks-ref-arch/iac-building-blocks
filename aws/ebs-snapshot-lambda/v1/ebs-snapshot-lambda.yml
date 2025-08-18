@@ -1,0 +1,302 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates EBS snapshot of an EC2 volume when stack is deleted.
+
+Parameters:
+  EC2InstanceId:
+    Type: String
+    Description: The ID of the EC2 instance.
+    AllowedPattern: ^i-[a-zA-Z0-9]{8,17}$
+    ConstraintDescription: Must be a valid EC2 instance ID starting with 'i-' followed by 8-17 alphanumeric characters
+
+  VolumeDeviceName:
+    Type: String 
+    Description: The device name of the volume attached to the EC2 instance.
+    AllowedPattern: ^/dev/[a-zA-Z0-9]+$
+    ConstraintDescription: Must be a valid device name starting with '/dev/'
+
+  ProductId:
+    Type: String
+    Description: The MathWorks product ID associated with the EC2 instance.
+    MinLength: 1
+    MaxLength: 128
+    AllowedPattern: ^[a-zA-Z0-9\-_]+$
+    ConstraintDescription: Product ID must be 1-128 alphanumeric characters, hyphens or underscores
+
+  Tags:
+    Type: String
+    Description: Tags to add to the snapshot in the form of "<key1>=<value1>,<key2>=<value2>". Can be empty.
+
+  PreSnapshotCommand:
+    Type: String
+    Description: Optional SSM command to run before snapshot creation. Ensure that the EC2 instance is running and that your command can be executed in 60 seconds or less; otherwise, the snapshot will be created without running the command. The command must be in the valid format '{{DocumentName}} COMMAND'. DocumentName must be either 'AWS-RunShellScript' or 'AWS-RunPowerShellScript'.
+    Default: ""
+
+  CustomExecutionRoleArn:
+    Type: String
+    Default: ""
+    Description: (Optional) ARN of an existing IAM role to be used by the lambda function. Make sure that the IAM role has the necessary permissions to create EBS snapshots. If you leave this parameter blank, a new IAM role will be created.
+    AllowedPattern: ^(arn:(aws|aws-cn|aws-us-gov):iam::\d{12}:role(\/[\w-]*)*)?$
+
+
+Conditions:
+  HasSSMCommand: !Not [!Equals [!Ref PreSnapshotCommand, ""]]
+  CreateNewRole: !Equals [!Ref CustomExecutionRoleArn, '']
+
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: CreateNewRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /MW/
+      Policies:
+        - PolicyName: LambdaEC2Policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadOnlyPermissions
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeVolumes
+                  - ssm:ListCommandInvocations
+                Resource: '*'
+              - Sid: SnapshotPermissions
+                Effect: Allow
+                Action:
+                  - ec2:CreateSnapshot
+                  - ec2:CreateTags
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}::snapshot/*
+              - Sid: CWLoggingPermissions
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*
+              - !If 
+                - HasSSMCommand
+                - Sid: SSMPermissions
+                  Effect: Allow
+                  Action:
+                    - ssm:SendCommand
+                  Resource: 
+                    - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript
+                    - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunPowerShellScript
+                    - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${EC2InstanceId}
+                - !Ref "AWS::NoValue"
+
+  MWSnapshotCreationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: index.handler
+      Role: !If 
+        - CreateNewRole
+        - !GetAtt LambdaExecutionRole.Arn
+        - !Ref CustomExecutionRoleArn
+      Runtime: python3.13
+      MemorySize: 512
+      Timeout: 300
+      Code:
+        ZipFile: |
+            import boto3
+            import cfnresponse
+            import logging
+            import time
+            import re
+
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+
+            def handler(event, context):
+                logger.info(f"Received event: {event}")
+                
+                if event['RequestType'] != 'Delete':
+                    logger.info("Request type is not 'Delete'. Sending success response.")
+                    cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                    return
+
+                try:
+                    ec2_instance_id = event['ResourceProperties']['EC2InstanceId']
+                    volume_device_name = event['ResourceProperties']['VolumeDeviceName']
+                    product_id = event['ResourceProperties']['ProductId']
+                    tags_str = event['ResourceProperties'].get('Tags', '')
+
+                    ec2 = boto3.client('ec2')
+                    resp = ec2.describe_instances(InstanceIds=[ec2_instance_id])
+                    state = resp['Reservations'][0]['Instances'][0]['State']['Name']
+                    logger.info(f"EC2 instance {ec2_instance_id} is in state: {state}")
+
+                    if state == 'running':
+                        optional_ssm_command = event['ResourceProperties'].get('PreSnapshotCommand', '')
+                        _handle_optional_ssm_command(ec2_instance_id, optional_ssm_command)
+                    else:
+                        logger.info(f"Skipped SSM command for EC2 instance {ec2_instance_id} in state: {state}")    
+
+                    snapshot_id = _create_snapshot(ec2_instance_id, volume_device_name, product_id, tags_str)
+                    message = f"Snapshot created successfully. Snapshot ID: {snapshot_id}"
+                    logger.info(message)
+                    
+                    cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Message': message}, "SnapshotCustomResource", False, message)
+                except Exception as e:
+                    logger.error(f"Error occurred: {str(e)}")
+                    cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+
+            def _handle_optional_ssm_command(ec2_instance_id, optional_ssm_command):
+                if optional_ssm_command:
+                    logger.info(f"Executing SSM Command: {optional_ssm_command} on Instance ID: {ec2_instance_id}")
+                    document_name, command = extract_document_and_command(optional_ssm_command)
+                    ssm = boto3.client('ssm')
+                    response = ssm.send_command(
+                        InstanceIds=[ec2_instance_id],
+                        TimeoutSeconds=60,
+                        DocumentName=document_name,
+                        Parameters={
+                            'commands': [command]
+                        },
+                        Comment=f'Run script before EBS snapshot for EC2 {ec2_instance_id}.'
+                    )
+                    command_id = response['Command']['CommandId']
+                    start_time = time.time() 
+                    while (time.time() - start_time) < 60:
+                        logger.info("Waiting for SSM Command execution ...")
+                        time.sleep(5)
+                        invocation_result = ssm.list_command_invocations(
+                            CommandId=command_id,
+                            InstanceId=ec2_instance_id,
+                            Details=True
+                        )
+                        
+                        if invocation_result['CommandInvocations']:
+                            invocation = invocation_result['CommandInvocations'][0]
+                            status = invocation['Status']
+                            command_output = invocation.get('CommandPlugins', [{}])[0].get('Output', None)
+                            logger.info(f"SSM command status: {status}")
+                            logger.info(f"SSM command output: {command_output}")
+
+                            if status in ['Success', 'Failed', 'TimedOut', 'Cancelled']:
+                                logging.info(f"SSM command execution completed with status: {status}")
+                                break
+
+            def _create_snapshot(ec2_instance_id, volume_device_name, product_id, tags_str):
+                ec2 = boto3.client('ec2')
+
+                logger.info(f"Fetching EC2 details for Instance ID: {ec2_instance_id}")
+                response = ec2.describe_instances(InstanceIds=[ec2_instance_id])
+                instances = response.get('Reservations', [])
+                if not instances:
+                    logger.info("No instances found for the given EC2 Instance ID.")
+                    raise Exception("Instance not found.")
+
+                volumes = instances[0]['Instances'][0]['BlockDeviceMappings']
+                volume_id = None
+                for volume in volumes:
+                    if volume['DeviceName'] == volume_device_name:
+                        logger.info(f"Found volume with device name: {volume_device_name}")
+                        volume_id = volume['Ebs']['VolumeId']
+                        break
+                
+                if not volume_id:
+                    logger.info(f"Volume not found for device name: {volume_device_name}")
+                    raise Exception("Volume not found.")
+
+                logging.info("Preparing snapshot tags ...")
+                tags = [{'Key': 'mw-ProductId', 'Value': product_id}]
+
+                if tags_str:
+                    existing_keys = {tag['Key'] for tag in tags}  # Set of existing keys to check for duplicates
+                    additional_tags = [
+                        {'Key': k, 'Value': v}
+                        for k, v in (tag.split('=') for tag in tags_str.split(','))
+                        if k not in existing_keys
+                    ]
+                    tags.extend(additional_tags)
+                
+                logger.info(f"Creating snapshot for Volume ID: {volume_id} with tags: {tags}")
+
+                snapshot = ec2.create_snapshot(
+                    VolumeId=volume_id,
+                    Description= f"This snapshot was created by MathWorks IaC when you deleted your stack for the product: '{product_id}'. Check the tags to learn more about the deleted stack.",
+                    TagSpecifications=[{
+                        'ResourceType': 'snapshot',
+                        'Tags': tags
+                    }]
+                )
+
+                snapshot_id = snapshot['SnapshotId']
+
+                logging.info(f"Snapshot creation completed successfully. Snapshot ID: {snapshot_id}")
+                return snapshot_id
+
+            def extract_document_and_command(input_string):
+                pattern = r"\{\{(.*?)\}\}(.*)"
+                match = re.match(pattern, input_string)
+
+                if match:
+                    document_name = match.group(1)
+                    command = match.group(2).strip()
+                    return document_name, command
+                else:
+                    raise Exception("Document name or command couldn't be fetched successfully. Make sure 'PreSnapshotCommand' is in valid form of '{{DocumentName}}COMMAND'.")
+
+  SnapshotCustomResource:
+    Type: Custom::SnapshotResource
+    Properties:
+      ServiceToken: !GetAtt MWSnapshotCreationFunction.Arn
+      ServiceTimeout: 300
+      EC2InstanceId: !Ref EC2InstanceId
+      VolumeDeviceName: !Ref VolumeDeviceName
+      Tags: !Ref Tags
+      PreSnapshotCommand: !Ref PreSnapshotCommand
+      ProductId: !Ref ProductId
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Instance Configuration"
+        Parameters:
+          - EC2InstanceId
+          - VolumeDeviceName
+          - ProductId
+
+      - Label:
+          default: "Snapshot Settings"
+        Parameters:
+          - Tags
+          - PreSnapshotCommand
+
+      - Label:
+          default: "Advanced Configuration"
+        Parameters:
+          - CustomExecutionRoleArn
+
+    ParameterLabels:
+      EC2InstanceId:
+        default: "EC2 Instance ID"
+      VolumeDeviceName:
+        default: "Volume Device Name"
+      ProductId:
+        default: "MathWorks Product ID"
+      Tags:
+        default: "Snapshot Tags"
+      PreSnapshotCommand:
+        default: "Pre-snapshot SSM Command"
+      CustomExecutionRoleArn:
+        default: "Lambda Execution Role ARN"
+Outputs:
+  SnapshotFunctionArn:
+    Description: The ARN of the snapshot creation Lambda function.
+    Value: !GetAtt MWSnapshotCreationFunction.Arn
