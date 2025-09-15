@@ -1,0 +1,439 @@
+# Copyright 2025 The MathWorks, Inc.
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::LanguageExtensions'
+Description: >
+  MathWorks Reference Architectures Template for Amazon Virtual Private Cloud (VPC): Creates a VPC with four subnets evenly distributed across two availability zones, gateway endpoints for Amazon S3 and DynamoDB services, an optional NAT Gateway, and optional interface endpoints for various AWS services.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: VPC Configuration
+        Parameters:
+          - VpcCidrBlock
+          - SubnetMask
+      - Label:
+          default: Enable internet access for private subnets
+        Parameters:
+          - DeployNatGateway
+      - Label:
+          default: Create Interface endpoints for private access to AWS services
+        Parameters:
+          - DeployEC2Endpoint
+          - DeployCloudWatchEndpoint
+          - DeployAutoScalingEndpoint
+          - DeployCloudFormationEndpoint
+    
+    ParameterLabels:
+      VpcCidrBlock:
+        default: VPC CIDR block
+      SubnetMask:
+        default: CIDR Mask for subnets
+      DeployNatGateway:
+        default: Create NAT Gateway
+      DeployEC2Endpoint:
+        default: Create EC2 endpoint
+      DeployCloudWatchEndpoint:
+        default: Create CloudWatch endpoint
+      DeployAutoScalingEndpoint:
+        default: Create Autoscaling endpoint
+      DeployCloudFormationEndpoint:
+        default: Create CloudFormation endpoint
+      
+
+Parameters:
+  VpcCidrBlock:
+    Type: String
+    Default: '10.0.0.0/16'
+    Description: 'CIDR block for the VPC. Must be a valid IPv4 CIDR block between /16 and /22.'
+    AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-2]))$'
+    ConstraintDescription: 'VPC CIDR block must be a valid IPv4 CIDR block (between /16 and /22)'
+
+  SubnetMask:
+    Type: String
+    Default: '24'
+    Description: >
+      CIDR mask for each VPC subnet. Four subnets (two public, two private) of the chosen size will be evenly distributed across two Availability Zones. Valid values range from '20' (4,096 IPs) to '25' (128 IPs). Subnet Mask should be at least two bits larger than the VPC CIDR Mask. For example, if the chosen VPC CIDR is /16, valid Subnet Masks are /18 or higher. This ensures that four subnets of the chosen size can be created in the VPC.
+    AllowedValues:
+      - '20'
+      - '21'
+      - '22'
+      - '23'
+      - '24'
+      - '25'
+
+  DeployNatGateway:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Yes', 'No']
+    Description: 'If internet access from private subnets is required, create a NAT Gateway. A single NAT Gateway will be deployed in the public subnet in the first Availability Zone.'
+
+  DeployEC2Endpoint:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Yes', 'No']
+    Description: 'Create VPC Interface Endpoint for EC2 service. A single endpoint for the EC2 service will be created in the private subnet in the first Availability Zone. All traffic to EC2 API will be routed through this endpoint.'
+
+  DeployCloudWatchEndpoint:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Yes', 'No']
+    Description: 'Create VPC Interface Endpoint for CloudWatch service. A single endpoint for the CloudWatch service will be created in the private subnet in the first Availability Zone. All traffic to CloudWatch API will be routed through this endpoint.'
+
+  DeployAutoScalingEndpoint:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Yes', 'No']
+    Description: 'Create VPC Interface Endpoint for EC2 Autoscaling service. A single endpoint for the EC2 Autoscaling service will be created in the private subnet in the first Availability Zone. All traffic to EC2 Autoscaling API will be routed through this endpoint.'
+
+  DeployCloudFormationEndpoint:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Yes', 'No']
+    Description: 'Create VPC Interface Endpoint for CloudFormation service. A single endpoint for the CloudFormation service will be created in the private subnet in the first Availability Zone. All traffic to CloudFormation API will be routed through this endpoint.'
+
+Conditions:
+  CreateNatGateway: !Equals [!Ref DeployNatGateway, 'Yes']
+  CreateEC2Endpoint: !Equals [!Ref DeployEC2Endpoint, 'Yes']
+  CreateCloudWatchEndpoint: !Equals [!Ref DeployCloudWatchEndpoint, 'Yes']
+  CreateAutoScalingEndpoint: !Equals [!Ref DeployAutoScalingEndpoint, 'Yes']
+  CreateCloudFormationEndpoint: !Equals [!Ref DeployCloudFormationEndpoint, 'Yes']
+  CreateAnyInterfaceEndpoint: !Or
+    - !Condition CreateEC2Endpoint
+    - !Condition CreateCloudWatchEndpoint
+    - !Condition CreateAutoScalingEndpoint
+    - !Condition CreateCloudFormationEndpoint
+
+Mappings:
+  # This mapping maps the chosen subnet mask to CIDR bits
+  SubnetMaskMap:
+    '20': 
+      CidrBits: 12
+    '21': 
+      CidrBits: 11
+    '22': 
+      CidrBits: 10
+    '23': 
+      CidrBits: 9
+    '24':  
+      CidrBits: 8
+    '25': 
+      CidrBits: 7
+  
+  # This mapping defines, for each subnet ID, the AZ index and the CIDR block index
+  SubnetConfigMap:
+    A:
+      PublicAzIndex: "0"     # First AZ
+      PublicCidrIndex: "0"   # First CIDR Block from Fn::Cidr
+      PrivateAzIndex: "0"
+      PrivateCidrIndex: "1"
+    B:
+      PublicAzIndex: "1"
+      PublicCidrIndex: "2"
+      PrivateAzIndex: "1"
+      PrivateCidrIndex: "3"
+
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-VPC'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-IGW'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # Creates two public subnets: PublicSubnetA, PublicSubnetB
+  'Fn::ForEach::AZPublicSubnet':
+    - Identifier
+    - [A, B]
+    - PublicSubnet${Identifier}:
+        Type: AWS::EC2::Subnet
+        Properties:
+          VpcId: !Ref VPC
+          CidrBlock: !Select
+            - !FindInMap [SubnetConfigMap, !Ref Identifier, PublicCidrIndex]
+            - !Cidr 
+              - !Ref VpcCidrBlock
+              - 4
+              - !FindInMap [SubnetMaskMap, !Ref SubnetMask, CidrBits]
+          AvailabilityZone: !Select
+            - !FindInMap [SubnetConfigMap, !Ref Identifier, PublicAzIndex]
+            - !GetAZs ''
+          MapPublicIpOnLaunch: true
+          Tags:
+            - Key: Name
+              Value: !Sub '${AWS::StackName}-PublicSubnet${Identifier}'
+
+  # Creates two private subnets: PrivateSubnetA, PrivateSubnetB
+  'Fn::ForEach::AZPrivateSubnet':
+    - Identifier
+    - [A, B]
+    - PrivateSubnet${Identifier}:
+        Type: AWS::EC2::Subnet
+        Properties:
+          VpcId: !Ref VPC
+          CidrBlock: !Select
+            - !FindInMap [SubnetConfigMap, !Ref Identifier, PrivateCidrIndex]
+            - !Cidr 
+              - !Ref VpcCidrBlock
+              - 4
+              - !FindInMap [SubnetMaskMap, !Ref SubnetMask, CidrBits]
+          AvailabilityZone: !Select
+            - !FindInMap [SubnetConfigMap, !Ref Identifier, PrivateAzIndex]
+            - !GetAZs ''
+          MapPublicIpOnLaunch: false
+          Tags:
+            - Key: Name
+              Value: !Sub '${AWS::StackName}-PrivateSubnet${Identifier}'
+
+  # NAT Gateway (Conditional)
+  NatGatewayEIP:
+    Type: AWS::EC2::EIP
+    Condition: CreateNatGateway
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-NAT-EIP'
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: CreateNatGateway
+    Properties:
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-NAT-Gateway'
+
+  # Public Route Table
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Public-RT'
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  'Fn::ForEach::PublicSubnetRouteTableAssociations':
+    - SubnetIdentifier
+    - [A, B]
+    - PublicSubnetRouteTableAssociation${SubnetIdentifier}:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+          SubnetId: !Ref 
+            'Fn::Sub': 'PublicSubnet${SubnetIdentifier}'
+          RouteTableId: !Ref PublicRouteTable
+
+  # Private Route Table
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-Private-RT'
+
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Condition: CreateNatGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NatGateway
+
+  'Fn::ForEach::PrivateSubnetRouteTableAssociations':
+    - SubnetIdentifier
+    - [A, B]
+    - PrivateSubnetRouteTableAssociation${SubnetIdentifier}:
+        Type: AWS::EC2::SubnetRouteTableAssociation
+        Properties:
+          SubnetId: !Ref 
+            'Fn::Sub': 'PrivateSubnet${SubnetIdentifier}'
+          RouteTableId: !Ref PrivateRouteTable
+
+  # S3 Gateway Endpoint
+  S3VPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+
+  # DynamoDB Gateway Endpoint
+  DynamoDBVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.dynamodb'
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+
+  # Security Group for Interface Endpoints
+  VPCEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateAnyInterfaceEndpoint
+    Properties:
+      GroupDescription: 'Security group for VPC Interface Endpoints'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidrBlock
+          Description: 'Allow HTTPS traffic from VPC'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-VPCEndpoint-SG'
+
+  # EC2 Interface Endpoint
+  EC2VPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateEC2Endpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ec2'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnetA
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  # CloudWatch Interface Endpoint
+  CloudWatchVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateCloudWatchEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.logs'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnetA
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  # Auto Scaling Interface Endpoint
+  AutoScalingVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateAutoScalingEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.autoscaling'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnetA
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  # CloudFormation Interface Endpoint
+  CloudFormationVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateCloudFormationEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.cloudformation'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnetA
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+Outputs:
+  VpcId:
+    Description: 'VPC ID'
+    Value: !Ref VPC
+  
+  VpcCidr:
+    Description: 'VPC CIDR'
+    Value: !GetAtt VPC.CidrBlock
+
+  'Fn::ForEach::PublicSubnetOutputs':
+    - SubnetName
+    - [A, B]
+    - PublicSubnet${SubnetName}Id:
+        Description: !Sub 'Public Subnet ${SubnetName} ID'
+        Value: !Ref 
+          'Fn::Sub': 'PublicSubnet${SubnetName}'
+
+  'Fn::ForEach::PrivateSubnetOutputs':
+    - SubnetName
+    - [A, B]
+    - PrivateSubnet${SubnetName}Id:
+        Description: !Sub 'Private Subnet ${SubnetName} ID'
+        Value: !Ref 
+          'Fn::Sub': 'PrivateSubnet${SubnetName}'
+
+  NATGatewayId:
+    Condition: CreateNatGateway
+    Description: 'NAT Gateway ID'
+    Value: !Ref NatGateway
+
+  NATGatewayElasticIPAddress:
+    Condition: CreateNatGateway
+    Description: 'NAT Gateway IP Address'
+    Value: !GetAtt NatGatewayEIP.PublicIp
+
+  VpcEndpointSecurityGroupId:
+    Condition: CreateAnyInterfaceEndpoint
+    Description: 'VPC Endpoint Security Group ID'
+    Value: !Ref VPCEndpointSecurityGroup
+
+  VpcGatewayEndpointForS3:
+    Description: 'Gateway Endpoint ID for S3'
+    Value: !Ref S3VPCEndpoint
+  
+  VpcGatewayEndpointForDynamoDB:
+    Description: 'Gateway Endpoint ID for DynamoDB'
+    Value: !Ref DynamoDBVPCEndpoint
+
+  VpcInterfaceEndpointForEC2:
+    Description: 'Interface Endpoint ID for EC2'
+    Condition: CreateEC2Endpoint
+    Value: !Ref EC2VPCEndpoint
+
+  VpcInterfaceEndpointForCloudWatch:
+    Description: 'Interface Endpoint ID for CloudWatch'
+    Condition: CreateCloudWatchEndpoint
+    Value: !Ref CloudWatchVPCEndpoint
+
+  VpcInterfaceEndpointForAutoScaling:
+    Description: 'Interface Endpoint ID for AutoScaling'
+    Condition: CreateAutoScalingEndpoint
+    Value: !Ref AutoScalingVPCEndpoint
+
+  VpcInterfaceEndpointForCloudFormation:
+    Description: 'Interface Endpoint ID for CloudFormation'
+    Condition: CreateCloudFormationEndpoint
+    Value: !Ref CloudFormationVPCEndpoint

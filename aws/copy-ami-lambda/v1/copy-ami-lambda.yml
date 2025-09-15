@@ -1,0 +1,186 @@
+# Copyright 2025 The MathWorks, Inc.
+AWSTemplateFormatVersion: '2010-09-09'
+
+Transform: AWS::LanguageExtensions
+
+Description: 'MathWorks Reference Architectures: AMI Copy Template - Copies a specified AMI from a source region into the current region.'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "AMI Copy Configuration"
+        Parameters:
+          - SourceAmiId
+          - SourceRegion
+          - AmiName
+          - ReferenceTag
+          - MWTemplateUrl
+    ParameterLabels:
+      SourceAmiId:
+        default: "Source AMI ID"
+      SourceRegion:
+        default: "Source Region"
+      AmiName:
+        default: "AMI Name"
+      ReferenceTag:
+        default: "Link to reference documentation for the copied AMI"
+      MWTemplateUrl:
+        default: "MathWorks Reference Architecture Template URL."
+
+Parameters:
+  SourceAmiId:
+    Type: String
+    Description: The ID of the AMI to copy from the source region.
+    AllowedPattern: ^ami-[a-f0-9]{8,17}$
+    ConstraintDescription: Must be a valid AMI ID (e.g., ami-xxxxxxxxxxxxxxxxx).
+
+  SourceRegion:
+    Type: String
+    Description: The AWS region where the source AMI resides.
+    AllowedPattern: ^[a-z-]+-\d{1}$
+
+  AmiName:
+    Type: String
+    Description: Name for the copied AMI.
+    Default: ''
+  ReferenceTag:
+    Type: String
+    Description: Optional reference link saved as tag on the copied AMI.
+    Default: ''
+  MWTemplateUrl:
+    Type: String
+    Description: >-
+      (Optional) S3 URL of MathWorks Reference Architecture CFT that the copied AMI will be used with.
+    Default: ''
+
+Resources:
+  AmiCopyLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          def lambda_handler(event, context):
+              response_data = {}
+              try:
+                  if event['RequestType'] == 'Create':
+                      props = event['ResourceProperties']
+                      source_ami = props['SourceAmiId']
+                      source_region = props['SourceRegion']
+                      target_name = props.get('AmiName', '')
+                      reference = props['ReferenceTag']
+
+                      ec2_source = boto3.client('ec2', region_name=source_region)
+                      ec2_dest = boto3.client('ec2')
+
+                      images = ec2_source.describe_images(ImageIds=[source_ami])['Images']
+                      if not images:
+                          raise Exception(f"Source AMI {source_ami} not found in region {source_region}")
+                      source_name = images[0].get('Name', f"Copied-{source_ami}")
+                      description = f"Copied from {source_ami} {source_name} in {source_region}"
+                      
+                      if not target_name:
+                          target_name = f"Copied from {source_name}"
+                      if not reference:
+                          reference = "https://github.com/mathworks-ref-arch/iac-building-blocks/tree/main/aws/ami-copy-lambda"
+
+                      response = ec2_dest.copy_image(
+                          Name=target_name,
+                          SourceImageId=source_ami,
+                          SourceRegion=source_region,
+                          Description=description
+                      )
+
+                      copied_ami_id = response['ImageId']
+                      response_data['CopiedAmiId'] = copied_ami_id
+
+                      ec2_dest.create_tags(
+                          Resources=[copied_ami_id],
+                          Tags=[
+                              {'Key': 'SourceAmiId', 'Value': source_ami},
+                              {'Key': 'Reference', 'Value': reference}
+                          ]
+                      )
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                  else:
+                      print(f"No action for event type: {event['RequestType']}")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+              except Exception as e:
+                  response_data['Error'] = str(e)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, response_data)
+
+      Handler: index.lambda_handler
+      Runtime: python3.13
+      Timeout: 300
+      Role: !GetAtt AmiCopyLambdaRole.Arn
+
+  AmiCopyLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: ami-copy-lambda-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CloudWatchLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Sid: AmiCopy
+                Effect: Allow
+                Action:
+                  - ec2:CopyImage
+                  - ec2:DescribeImages
+                Resource: '*'
+              - Sid: AmiTagging
+                Effect: Allow
+                Action:
+                - ec2:CreateTags
+                Resource: '*'
+
+  AmiCopyTrigger:
+    Type: Custom::AmiCopyLambdaTrigger
+    DependsOn:
+      - AmiCopyLambda
+      - AmiCopyLambdaRole
+    Properties:
+      ServiceToken: !GetAtt AmiCopyLambda.Arn
+      SourceAmiId: !Ref SourceAmiId
+      SourceRegion: !Ref SourceRegion
+      AmiName: !Ref AmiName
+      ReferenceTag: !Ref ReferenceTag
+
+Outputs:
+  CopiedAmiId:
+    Description: The ID of the copied AMI in the current region.
+    Value: !GetAtt AmiCopyTrigger.CopiedAmiId
+  CopiedAmiConsoleLink:
+    Description: Console link to view the copied AMI. You can use this link to check the readiness of the copied AMI.
+    Value: !Sub 
+      - "https://console.aws.amazon.com/ec2/home?region=${AWS::Region}#ImageDetails:imageId=${CopiedAmiId}"
+      - CopiedAmiId: !GetAtt AmiCopyTrigger.CopiedAmiId
+  LaunchClusterWithCopiedAmi:
+    Condition: ShowDeploymentLink
+    Description: Launch a new cluster stack using the copied AMI in your account. This link will open the CloudFormation console to create a new stack, with the custom AMI ID prepopulated. You should only click this link when the AMI is ready, which may take 5-15 minutes.
+    Value: !Sub
+      - "https://${AWS::Region}.console.aws.amazon.com/cloudformation/home?region=${AWS::Region}#/stacks/create/review?templateURL=${MWTemplateUrl}&param_customAmiId=${CopiedAmiId}&param_InstanceAmiCustom=${CopiedAmiId}"
+      - 
+        MWTemplateUrl: !Ref MWTemplateUrl
+        CopiedAmiId: !GetAtt AmiCopyTrigger.CopiedAmiId
+
+Conditions:
+  ShowDeploymentLink: !Not [!Equals [!Ref MWTemplateUrl, ""]]
