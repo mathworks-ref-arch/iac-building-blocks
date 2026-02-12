@@ -40,9 +40,9 @@ The created VPC has this architecture:
 For general instructions on creating a new stack using a CloudFormation template, see  
 See [Creating a Stack (AWS CloudFormation Documentation)](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-console-create-stack.html).
 
-You can either use the template from this folder directly, or you can use the S3 link: 
+You can either use the template from this folder directly, or you can use the S3 link:
 ```
-https://mathworks-reference-architectures-templates.s3.amazonaws.com/vpc-template/v1/0/0/vpc-template.yml
+https://mathworks-reference-architectures-templates.s3.amazonaws.com/vpc-template/v1/0/1/vpc-template.yml
 ```
 
 MathWorks recommends these practices:

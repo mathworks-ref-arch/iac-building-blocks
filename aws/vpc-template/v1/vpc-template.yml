@@ -437,3 +437,27 @@ Outputs:
     Description: 'Interface Endpoint ID for CloudFormation'
     Condition: CreateCloudFormationEndpoint
     Value: !Ref CloudFormationVPCEndpoint
+
+  'Fn::ForEach::PublicSubnetCidrOutputs':
+    - SubnetName
+    - [A, B]
+    - PublicSubnet${SubnetName}CidrBlock:
+        Description: !Sub 'Public Subnet ${SubnetName} CIDR Block'
+        Value: !Select
+          - !FindInMap [SubnetConfigMap, !Ref SubnetName, PublicCidrIndex]
+          - !Cidr
+            - !Ref VpcCidrBlock
+            - 4
+            - !FindInMap [SubnetMaskMap, !Ref SubnetMask, CidrBits]
+
+  'Fn::ForEach::PrivateSubnetCidrOutputs':
+    - SubnetName
+    - [A, B]
+    - PrivateSubnet${SubnetName}CidrBlock:
+        Description: !Sub 'Private Subnet ${SubnetName} CIDR Block'
+        Value: !Select
+          - !FindInMap [SubnetConfigMap, !Ref SubnetName, PrivateCidrIndex]
+          - !Cidr
+            - !Ref VpcCidrBlock
+            - 4
+            - !FindInMap [SubnetMaskMap, !Ref SubnetMask, CidrBits]
