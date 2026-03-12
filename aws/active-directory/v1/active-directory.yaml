@@ -1,0 +1,664 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: This template creates an AWS Active Directory, a Secrets Manager resource, and an SSM Automation runbook for domain joining MATLAB Windows EC2 instances.
+Transform: AWS::LanguageExtensions
+
+
+Parameters:
+  ADShortName:
+    Description: "NetBIOS name for the AD domain, e.g. CORP"
+    Type: String
+    AllowedPattern: ^[A-Z][A-Z0-9]{0,14}$
+  ADDomainName:
+    Description: "The FQDN for the AD domain, e.g. corp.example.com"
+    Type: String
+    AllowedPattern: ^([a-zA-Z0-9]+[\.-])+([a-zA-Z0-9])+$
+  ADDomainTargetOU:
+    Description: "Enter the Organizational Unit (OU) where your domain joined server will reside. e.g. OU=Computers,OU=CORP,dc=corp,dc=example,dc=com"
+    Type: String
+  ADAdminPassword:
+    Description: Password for the Directory Service Administrator user.
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 64
+    AllowedPattern: (?=^.{8,64}$)((?=.*\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*
+  LicenseManagerAdminPassword:
+    Description: "Password for user 'manager'. This is used to login to the Network License Manager for MATLAB dashboard."
+    Type: String
+    NoEcho: true
+    Default: ''
+    ConstraintDescription: ''
+  AdminKeyPair:
+    Description: "The name of an existing EC2 KeyPair to allow SSH access to all the instances. See https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html for details on creating these."
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+    AllowedPattern: ".+"
+  NLMAllowedIpAddresses:
+    Description: "Comma-separated list of IP address ranges that will be allowed to access the NLM instance. Each IP CIDR should be formatted as <ip_address>/<mask>. The mask determines the number of IP addresses to include. A mask of 32 is a single IP address. Example of allowed values: 10.0.0.1/32 or 10.0.0.0/16,192.34.56.78/32. This calculator can be used to build a specific range: https://www.ipaddressguide.com/cidr. You may need to contact your IT administrator to determine which address is appropriate."
+    Type: String
+    MinLength: "9"
+    MaxLength: "189"
+    AllowedPattern: "^((\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2}))(,((\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2}))){0,9}$"
+    ConstraintDescription: Must be a comma-separated list of valid IP CIDR ranges of the form x.x.x.x/x. A maximum of 10 such IP CIDRs are allowed in the list.
+
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Active Directory Configuration
+        Parameters:
+          - ADShortName
+          - ADDomainName
+          - ADDomainTargetOU
+          - ADAdminPassword
+      - Label:
+          default: License Manager Configuration
+        Parameters:
+          - LicenseManagerAdminPassword
+          - NLMAllowedIpAddresses
+      - Label:
+          default: Security & Network Access
+        Parameters:
+          - AdminKeyPair
+          
+    ParameterLabels:
+      ADShortName:
+        default: AD NetBIOS name
+      ADDomainName:
+        default: AD domain (FQDN)
+      ADDomainTargetOU:
+        default: AD Target OU
+      ADAdminPassword:
+        default: AD administrator password
+      LicenseManagerAdminPassword:
+        default: Admin password for MATLAB Network License Manager
+      AdminKeyPair:
+        default: EC2 KeyPair name
+      NLMAllowedIpAddresses:
+        default: Allowed IP address(es) for License Manager Dashboard access
+
+
+Resources:
+ 
+# ============================================================
+#     NETWORK
+# ============================================================
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TemplateURL: https://mathworks-reference-architectures-templates.s3.amazonaws.com/vpc-template/v1/0/1/vpc-template.yml
+      Parameters:
+        VpcCidrBlock: 10.0.0.0/16
+        SubnetMask: 24
+        DeployNatGateway: 'Yes'
+
+# ============================================================
+#     License Manager for MATLAB
+# ============================================================
+  MatlabLicenseManagerStack:
+    Type: AWS::CloudFormation::Stack
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TemplateURL: https://network-license-manager-for-matlab-on-aws.s3.amazonaws.com/v1/latest/license-manager-template.json
+      Parameters:
+        VPC: !GetAtt NetworkStack.Outputs.VpcId
+        Subnet: !GetAtt NetworkStack.Outputs.PublicSubnetAId
+        EnablePublicIPAddress: 'Yes'
+        ClientIPAddress: !Sub '${NLMAllowedIpAddresses},${NetworkStack.Outputs.PrivateSubnetACidrBlock},${NetworkStack.Outputs.PrivateSubnetBCidrBlock},${NetworkStack.Outputs.PublicSubnetACidrBlock},${NetworkStack.Outputs.PublicSubnetBCidrBlock}'
+        ServerInstanceType: t2.micro
+        SSHKeyName: !Ref AdminKeyPair
+        Password: !Ref LicenseManagerAdminPassword
+        ConfirmPassword: !Ref LicenseManagerAdminPassword
+        OptionalUserCommand: ""
+  
+# ============================================================
+#     Active Directory and Network Configuration for AD
+# ============================================================
+  ActiveDirectory:
+    Type: AWS::DirectoryService::MicrosoftAD
+    Properties:
+      Name: !Ref ADDomainName
+      ShortName: !Ref ADShortName
+      Password: !Ref ADAdminPassword
+      Edition: Standard 
+      VpcSettings:
+        VpcId: !GetAtt NetworkStack.Outputs.VpcId
+        SubnetIds:
+          - !GetAtt NetworkStack.Outputs.PrivateSubnetAId
+          - !GetAtt NetworkStack.Outputs.PrivateSubnetBId
+
+  ActiveDirectoryDHCPOption:
+    Type: AWS::EC2::DHCPOptions
+    Properties:
+      DomainName: !Ref ADDomainName
+      DomainNameServers: !GetAtt ActiveDirectory.DnsIpAddresses
+      Tags: 
+      - Key: Name
+        Value: !Sub '${ADDomainName}-(AD ${ActiveDirectory})'
+      
+  VPCDHCPOptionsAssociation:
+    Type: AWS::EC2::VPCDHCPOptionsAssociation
+    Properties:
+      VpcId: !GetAtt NetworkStack.Outputs.VpcId
+      DhcpOptionsId: !Ref ActiveDirectoryDHCPOption 
+   
+  ActiveDirectorySecrets:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      # KmsKeyId: Use this property to specify a custom AWS KMS key that Secrets Manager will use to encrypt the secret's value.
+      SecretString:
+        Fn::ToJsonString:
+          domainName: !Ref ADDomainName
+          defaultTargetOU: !Ref ADDomainTargetOU
+          domainJoinUserName: !Sub "${ADShortName}\\Admin"
+          domainJoinPassword: !Ref ADAdminPassword
+
+# ============================================================
+#     Automate AD Join via SSM Automation Document
+# ============================================================
+  ADJoinSSMAutomationAssumeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: IAM Role for SSM Automation to join instances to AD and tag them.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ssm.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /MW/
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonSSMDirectoryServiceAccess
+        - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
+        - arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
+
+      Policies:
+        - PolicyName: AD-Join-Automation
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref ActiveDirectorySecrets
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - !Sub arn:${AWS::Partition}:ssm:*:*:document/AWS-RunPowerShellScript
+              - Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:RebootInstances
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+
+  ADJoinSSMDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentType: Automation
+      TargetType: /AWS::EC2::Instance
+      UpdateMethod: NewVersion
+      DocumentFormat: YAML
+      Name: !Sub 'MW-ADDomainJoin-${ActiveDirectory}'
+      Content:
+        !Sub |
+            schemaVersion: '0.3'
+            description: 'This document will join EC2 Windows instances to Active Directory domain ${ADDomainName} (AWS Directory ID: ${ActiveDirectory}).'
+            assumeRole: '{{AutomationAssumeRole}}'
+            parameters:
+              AutomationAssumeRole:
+                default: ''
+                description: (Optional) The ARN of the role that allows Automation to perform the actions on your behalf.
+                type: String
+              InstanceId:
+                description: (Required) The Instance running Windows Server.
+                type: String
+            mainSteps:
+              - description: Assert the instance is Windows.
+                name: assert_instance_is_Windows
+                action: aws:assertAwsResourceProperty
+                timeoutSeconds: 10
+                nextStep: wait_for_ssm_online
+                isEnd: false
+                inputs:
+                  Service: ec2
+                  PropertySelector: $.Reservations[0].Instances[0].Platform
+                  Api: DescribeInstances
+                  DesiredValues:
+                    - windows
+                  InstanceIds:
+                    - '{{InstanceId}}'
+              - description: Wait until the instance is managed by SSM and is online.
+                name: wait_for_ssm_online
+                action: aws:waitForAwsResourceProperty
+                timeoutSeconds: 600
+                nextStep: get_domain_secrets
+                isEnd: false
+                inputs:
+                  Service: ssm
+                  Api: DescribeInstanceInformation
+                  InstanceInformationFilterList:
+                    - key: InstanceIds
+                      valueSet:
+                        - '{{InstanceId}}'
+                  PropertySelector: $.InstanceInformationList[0].PingStatus
+                  DesiredValues:
+                    - Online
+              - description: Fetch domain join secrets from Secrets Manager.
+                name: get_domain_secrets
+                action: aws:executeScript
+                timeoutSeconds: 30
+                nextStep: join_ec2_to_AD_domain
+                isEnd: false
+                inputs:
+                  Runtime: python3.11
+                  Handler: get_secrets
+                  InputPayload:
+                    SecretId: ${ActiveDirectorySecrets}
+                  Script: |-
+                    def get_secrets(events, context):
+                      import boto3, json
+                      secret_id = events['SecretId']
+                      client = boto3.client('secretsmanager')
+                      response = client.get_secret_value(SecretId=secret_id)
+                      secret = json.loads(response['SecretString'])
+                      return {
+                        "defaultTargetOU": secret.get("defaultTargetOU"),
+                        "domainName": secret.get("domainName"),
+                        "domainJoinUserName": secret.get("domainJoinUserName"),
+                        "domainJoinPassword": secret.get("domainJoinPassword")
+                      }
+                outputs:
+                  - Name: defaultTargetOU
+                    Selector: $.Payload.defaultTargetOU
+                    Type: String
+                  - Name: domainName
+                    Selector: $.Payload.domainName
+                    Type: String
+                  - Name: domainJoinUserName
+                    Selector: $.Payload.domainJoinUserName
+                    Type: String
+                  - Name: domainJoinPassword
+                    Selector: $.Payload.domainJoinPassword
+                    Type: String
+              - description: Execute PowerShell locally on EC2 instance to join the AD domain.
+                name: join_ec2_to_AD_domain
+                action: aws:runCommand
+                timeoutSeconds: 600
+                nextStep: add_ADJoined_success_tag
+                isEnd: false
+                onFailure: step:add_ADJoin_failure_tag
+                inputs:
+                  Parameters:
+                    commands: |-
+                      $targetOU = "{{ get_domain_secrets.defaultTargetOU }}"
+                      $domainName = "{{ get_domain_secrets.domainName }}"
+                      $domainJoinUserName = "{{ get_domain_secrets.domainJoinUserName }}"
+                      $domainJoinPassword = "{{ get_domain_secrets.domainJoinPassword }}" | ConvertTo-SecureString -AsPlainText -Force
+
+                      If ((Get-CimInstance -ClassName 'Win32_ComputerSystem' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty 'PartOfDomain') -eq $false) {
+                          $domainCredential = New-Object System.Management.Automation.PSCredential($domainJoinUserName, $domainJoinPassword)
+                          Try {
+                              Write-Output "Attempting to join $env:COMPUTERNAME to Active Directory domain: $domainName and moving $env:COMPUTERNAME to the following OU: $targetOU."
+                              Add-Computer -ComputerName $env:COMPUTERNAME -DomainName $domainName -Credential $domainCredential -OUPath $targetOU -Restart:$false -ErrorAction Stop 
+                          } Catch [System.Exception] {
+                              Write-Output "Failed to add computer to the domain $_"
+                              Exit 1
+                          }
+                      } Else {
+                          Write-Output "$env:COMPUTERNAME is already part of the Active Directory domain $domainName."
+                          Exit 0
+                      }
+                  InstanceIds:
+                    - '{{InstanceId}}'
+                  DocumentName: AWS-RunPowerShellScript
+              - description: Add mw-JoinToActiveDirectory EC2 tag to reflect joining to AD domain.
+                name: add_ADJoined_success_tag
+                action: aws:createTags
+                nextStep: set_ad_login_for_nice_dcv
+                isEnd: false
+                inputs:
+                  ResourceIds:
+                    - '{{InstanceId}}'
+                  ResourceType: EC2
+                  Tags:
+                    - Value: Join-complete
+                      Key: mw-JoinToActiveDirectory
+              - description: Use Active Directory login in NICE DCV sessions. For more information see https://aws.amazon.com/blogs/desktop-and-application-streaming/dynamically-set-nice-dcv-session-permissions-at-windows-logon/
+                name: set_ad_login_for_nice_dcv
+                action: aws:runCommand
+                timeoutSeconds: 600
+                nextStep: reboot_server
+                isEnd: false
+                inputs:
+                  Parameters:
+                    commands: |-
+                        # --- 1. Ensure Registry Setting ---
+
+                        $dcvRegPath = "Registry::HKEY_USERS\S-1-5-18\Software\GSettings\com\nicesoftware\dcv\security"
+                        if (-not (Test-Path $dcvRegPath)) {
+                            New-Item -Path $dcvRegPath -Force | Out-Null
+                            Write-Host "Created registry path: $dcvRegPath"
+                        } else {
+                            Write-Host "Registry path exists: $dcvRegPath"
+                        }
+                        Set-ItemProperty -Path $dcvRegPath -Name "authentication" -Value "system"
+                        Write-Host "Set registry 'authentication' property to 'system'"
+
+                        # --- 2. NICE DCV Permission File Logic ---
+
+                        # Check if NICE DCV is installed
+                        $dcvPath = "C:\Program Files\NICE\DCV\Server"
+                        $permFile = Join-Path $dcvPath "conf\default.perm"
+
+                        if (!(Test-Path $dcvPath)) {
+                            Write-Host "NICE DCV not installed. Exiting script."
+                            exit
+                        }
+
+                        if (!(Test-Path $permFile)) {
+                            Write-Host "Permission file not found at $permFile. Exiting script."
+                            exit
+                        }
+
+                        Write-Host "NICE DCV installation found. Checking permission file..."
+
+                        # Read raw bytes to detect encoding
+                        $bytes = [System.IO.File]::ReadAllBytes($permFile)
+                        $encoding = [System.Text.Encoding]::ASCII  # default fallback
+
+                        # Try detect BOMs
+                        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+                            $encoding = [System.Text.Encoding]::UTF8
+                        } elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+                            $encoding = [System.Text.Encoding]::Unicode
+                        } elseif ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFE -and $bytes[1] -eq 0xFF) {
+                            $encoding = [System.Text.Encoding]::BigEndianUnicode
+                        }
+
+                        # Read content as text
+                        $content = [System.IO.File]::ReadAllLines($permFile, $encoding)
+
+                        # Locate [permissions] section
+                        $permIndex = $content.IndexOf("[permissions]")
+
+                        if ($permIndex -eq -1) {
+                            Write-Host "[permissions] section not found in file. No changes made."
+                            exit
+                        }
+
+                        # Check if already present
+                        if ($content -contains "%any% allow builtin") {
+                            Write-Host "'%any% allow builtin' already present. No changes needed."
+                            exit
+                        }
+
+                        # Insert new line after [permissions]
+                        $newContent = @()
+                        for ($i = 0; $i -lt $content.Count; $i++) {
+                            $newContent += $content[$i]
+                            if ($content[$i] -match "^\[permissions\]") {
+                                $newContent += "%any% allow builtin"
+                            }
+                        }
+
+                        # Backup original file
+                        $backupFile = "$permFile.bak_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+                        Copy-Item $permFile $backupFile -Force
+                        Write-Host "Backup created: $backupFile"
+
+                        # Write file back with same encoding
+                        [System.IO.File]::WriteAllLines($permFile, $newContent, $encoding)
+                        Write-Host "Permission file updated successfully using $($encoding.EncodingName) encoding."
+
+
+                  InstanceIds:
+                    - '{{InstanceId}}'
+                  DocumentName: AWS-RunPowerShellScript
+              - description: Update mw-JoinToActiveDirectory EC2 tag to reflect a failure in the AD domain join process.
+                name: add_ADJoin_failure_tag
+                action: aws:createTags
+                timeoutSeconds: 30
+                isEnd: true
+                inputs:
+                  ResourceIds:
+                    - '{{InstanceId}}'
+                  ResourceType: EC2
+                  Tags:
+                    - Value: Failed
+                      Key: mw-JoinToActiveDirectory
+              - name: reboot_server
+                action: aws:executeAwsApi
+                isEnd: true
+                inputs:
+                  Service: ec2
+                  Api: RebootInstances
+                  InstanceIds:
+                    - '{{InstanceId}}'
+
+# ============================================================
+#     AD join automation trigger: EventBridge -> Lambda -> StartAutomationExecution
+# ============================================================
+  ADJoinTriggerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Role for Lambda that starts SSM Automation to join Windows instances to AD.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /MW/
+      Policies:
+        - PolicyName: CloudWatchAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+        - PolicyName: SSMAutomationAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DescribeInstanceToFilterWindowsAndTags
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                Resource: '*'
+              - Sid: StartAutomation
+                Effect: Allow
+                Action:
+                  - ssm:StartAutomationExecution
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${ADJoinSSMDocument}:$DEFAULT
+              - Sid: PassAutomationRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt ADJoinSSMAutomationAssumeRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ssm.amazonaws.com
+  
+  ADJoinTriggerLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Starts SSM Automation to join Windows EC2 instances to AD.
+      Handler: index.handler
+      Runtime: python3.13
+      MemorySize: 256
+      Role: !GetAtt ADJoinTriggerLambdaRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          AUTOMATION_DOCUMENT_NAME: !Ref ADJoinSSMDocument
+          AUTOMATION_ASSUME_ROLE_ARN: !GetAtt ADJoinSSMAutomationAssumeRole.Arn
+          TARGET_VPC_ID: !GetAtt NetworkStack.Outputs.VpcId
+      Code:
+        ZipFile: |
+            import os
+            import json
+            import boto3
+            import logging
+
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+
+            ssm = boto3.client('ssm')
+            ec2 = boto3.client('ec2')
+
+            DOC = os.environ['AUTOMATION_DOCUMENT_NAME']
+            ASSUME_ROLE = os.environ['AUTOMATION_ASSUME_ROLE_ARN']
+            TARGET_TAG_KEY = 'mw-JoinToActiveDirectory'
+            TARGET_VALUE = 'Join-complete'
+
+            def is_windows_instance(instance):
+                platform = instance.get('PlatformDetails') or instance.get('Platform')
+                result = (platform and 'windows' in platform.lower()) or (instance.get('Platform', '') == 'windows')
+                logger.debug(f"Instance {instance.get('InstanceId')}: PlatformDetails={platform}, is_windows={result}")
+                return result
+
+            def is_in_target_vpc(instance):
+                vpc_id = instance.get('VpcId')
+                result = vpc_id == os.environ['TARGET_VPC_ID']
+                logger.debug(f"Instance {instance.get('InstanceId')}: VpcId={vpc_id}, is_in_target_vpc={result}")
+                return result
+
+            def has_eligible_tag(instance):
+                tags = {t['Key']: t['Value'] for t in instance.get('Tags', [])}
+                mw_product = tags.get('mw-ProductID', '').lower()
+                join_state = tags.get(TARGET_TAG_KEY, '')
+                result = (
+                    mw_product in ['mathworks-matlab-windows'] and
+                    join_state != TARGET_VALUE
+                )
+                logger.debug(
+                    f"Instance {instance.get('InstanceId')}: Tags={tags}, "
+                    f"has_eligible_tag={result} (mw-ProductID={mw_product}, {TARGET_TAG_KEY}={join_state})"
+                )
+                return result
+
+            def get_instance(instance_id):
+                logger.info(f"Describing instance {instance_id}")
+                resp = ec2.describe_instances(InstanceIds=[instance_id])
+                rsv = resp['Reservations']
+                if not rsv or not rsv[0]['Instances']:
+                    logger.warning(f"No instance found for {instance_id}")
+                    return None
+                logger.debug(f"Instance details for {instance_id}: {rsv[0]['Instances'][0]}")
+                return rsv[0]['Instances'][0]
+
+            def start_automation(instance_id):
+                logger.info(f"Starting SSM Automation {DOC} for {instance_id}")
+                ssm.start_automation_execution(
+                    DocumentName=DOC,
+                    Parameters={
+                        'InstanceId': [instance_id],
+                        'AutomationAssumeRole': [ASSUME_ROLE]
+                    }
+                )
+
+            def handler(event, context):
+                logger.info(f"Received event: {json.dumps(event)}")
+                results = {'started': [], 'skipped': []}
+
+                # Only handle EC2 Instance State-change Notification events
+                if not (event.get('source') == 'aws.ec2' and event.get('detail-type') == 'EC2 Instance State-change Notification'):
+                    logger.info("Event is not a relevant EC2 state-change notification. Skipping.")
+                    return results
+
+                instance_id = event.get('detail', {}).get('instance-id')
+                if not instance_id:
+                    logger.info("EC2 state-change event is missing an instance-id. Skipping.")
+                    return results
+
+                try:
+                    logger.info(f"Processing instance {instance_id}")
+                    instance = get_instance(instance_id)
+                    if not instance:
+                        logger.info(f"Skipping {instance_id}: DescribeInstances returned no instance")
+                        results['skipped'].append({'instance': instance_id, 'reason': 'DescribeInstances returned no instance'})
+                        return results
+                    if not is_in_target_vpc(instance):
+                        logger.info(f"Skipping {instance_id}: Not in target VPC")
+                        results['skipped'].append({'instance': instance_id, 'reason': 'Not in target VPC'})
+                        return results
+                    if not is_windows_instance(instance):
+                        logger.info(f"Skipping {instance_id}: Not a Windows instance")
+                        results['skipped'].append({'instance': instance_id, 'reason': 'Not Windows'})
+                        return results
+                    if not has_eligible_tag(instance):
+                        logger.info(f"Skipping {instance_id}: unsupported product or join state")
+                        results['skipped'].append({'instance': instance_id, 'reason': "Unsupported product or join state"})
+                        return results
+                    logger.info(f"All checks passed for {instance_id}, starting automation")
+                    start_automation(instance_id)
+                    results['started'].append(instance_id)
+                except ssm.exceptions.AutomationDefinitionNotFoundException:
+                    logger.exception(f"SSM Automation document '{DOC}' not found for {instance_id}")
+                    results['skipped'].append({'instance': instance_id, 'reason': 'Document not found'})
+                except Exception as e:
+                    logger.exception(f"Failed processing instance {instance_id}: {e}")
+                    results['skipped'].append({'instance': instance_id, 'reason': str(e)})
+
+                logger.info(f"Execution summary: {json.dumps(results)}")
+                return results
+  
+  ADJoinEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Trigger Lambda on new MATLAB Windows instances.
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - EC2 Instance State-change Notification
+        detail:
+          state:
+            - running
+          # EventBridge does not include or filter tag values, Lambda will check tags and OS.
+        resources:
+          - prefix: "arn:aws:ec2:"
+      Targets:
+        - Arn: !GetAtt ADJoinTriggerLambdaFunction.Arn
+          Id: ADJoinTriggerLambdaTarget
+  
+  ADJoinEventRulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ADJoinTriggerLambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ADJoinEventRule.Arn
+ 
+
+Outputs:
+  NLMDashboardURL:
+    Description: 'The URL of the Network License Manager for MATLAB dashboard'
+    Value: !GetAtt MatlabLicenseManagerStack.Outputs.ServerAddress
+  SSMAutomationARN:
+    Description: 'The full ARN of the Automation runbook.'
+    Value: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:automation-definition/${ADJoinSSMDocument}'
+  EC2JoinExecutionURL:
+    Description: 'AWS SSM URL to execute and join your existing Windows EC2 to Active Directory.'
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/systems-manager/automation/execute/${ADJoinSSMDocument}?region=${AWS::Region}#AutomationAssumeRole=${ADJoinSSMAutomationAssumeRole.Arn}'
+  DirectoryId:
+    Description: 'Directory Service ID'
+    Value: !Ref ActiveDirectory
+  MATLABWindowsDeploymentUrl:
+    Description: 'Share this URL with your users. They can use it to deploy their own MATLAB Windows instances joined to the Active Directory, and connect to it using DCV or RDP protocols. VPC, Subnet, keypair and NLM details will be pre-filled for your users. You can replace R2025b in the URL with the desired MATLAB release version as needed. Note that instance will reboot and require a few minutes for AD initialization before remote access.'
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudformation/home?region=${AWS::Region}#/stacks/quickcreate?templateURL=https://matlab-on-aws-win.s3.amazonaws.com/R2025b/aws-matlab-template.json&param_RDPKeyName=${AdminKeyPair}&param_VPC=${NetworkStack.Outputs.VpcId}&param_LicenseManager=27000@${MatlabLicenseManagerStack.Outputs.ServerPrivateDNS}&param_Subnet=${NetworkStack.Outputs.PublicSubnetBId}'
+    
