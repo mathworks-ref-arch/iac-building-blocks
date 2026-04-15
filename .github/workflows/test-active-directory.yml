@@ -1,0 +1,29 @@
+# Copyright 2026 The MathWorks, Inc
+
+name: Active Directory Lambda Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'aws/active-directory/v1/**'
+      - 'aws/test_utils/**'
+      - '.github/workflows/test-active-directory.yml'
+      - '.github/workflows/lambda-test-template.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'aws/active-directory/v1/**'
+      - 'aws/test_utils/**'
+      - '.github/workflows/test-active-directory.yml'
+      - '.github/workflows/lambda-test-template.yml'
+
+jobs:
+  test:
+    uses: ./.github/workflows/lambda-test-template.yml
+    with:
+      lambda_name: 'active-directory'
+      working_directory: 'aws/active-directory/v1/'
+      test_file: 'test-active-directory-trigger-lambda.py'

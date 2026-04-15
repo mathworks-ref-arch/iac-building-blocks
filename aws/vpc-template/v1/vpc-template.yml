@@ -23,6 +23,7 @@ Metadata:
           - DeployCloudWatchEndpoint
           - DeployAutoScalingEndpoint
           - DeployCloudFormationEndpoint
+          - DeploySSMEndpoints
     
     ParameterLabels:
       VpcCidrBlock:
@@ -39,6 +40,8 @@ Metadata:
         default: Create Autoscaling endpoint
       DeployCloudFormationEndpoint:
         default: Create CloudFormation endpoint
+      DeploySSMEndpoints:
+        default: Create SSM endpoints
       
 
 Parameters:
@@ -92,17 +95,25 @@ Parameters:
     AllowedValues: ['Yes', 'No']
     Description: 'Create VPC Interface Endpoint for CloudFormation service. A single endpoint for the CloudFormation service will be created in the private subnet in the first Availability Zone. All traffic to CloudFormation API will be routed through this endpoint.'
 
+  DeploySSMEndpoints:
+    Type: String
+    Default: 'No'
+    AllowedValues: ['Yes', 'No']
+    Description: 'Create VPC Interface Endpoints for AWS Systems Manager (SSM) services. Three endpoints (ssm, ssmmessages, ec2messages) are created in the private subnet in the first Availability Zone. All traffic to SSM APIs is routed through these endpoints.'
+
 Conditions:
   CreateNatGateway: !Equals [!Ref DeployNatGateway, 'Yes']
   CreateEC2Endpoint: !Equals [!Ref DeployEC2Endpoint, 'Yes']
   CreateCloudWatchEndpoint: !Equals [!Ref DeployCloudWatchEndpoint, 'Yes']
   CreateAutoScalingEndpoint: !Equals [!Ref DeployAutoScalingEndpoint, 'Yes']
   CreateCloudFormationEndpoint: !Equals [!Ref DeployCloudFormationEndpoint, 'Yes']
+  CreateSSMEndpoints: !Equals [!Ref DeploySSMEndpoints, 'Yes']
   CreateAnyInterfaceEndpoint: !Or
     - !Condition CreateEC2Endpoint
     - !Condition CreateCloudWatchEndpoint
     - !Condition CreateAutoScalingEndpoint
     - !Condition CreateCloudFormationEndpoint
+    - !Condition CreateSSMEndpoints
 
 Mappings:
   # This mapping maps the chosen subnet mask to CIDR bits
@@ -286,6 +297,7 @@ Resources:
       VpcEndpointType: Gateway
       RouteTableIds:
         - !Ref PrivateRouteTable
+        - !Ref PublicRouteTable
 
   # DynamoDB Gateway Endpoint
   DynamoDBVPCEndpoint:
@@ -296,6 +308,7 @@ Resources:
       VpcEndpointType: Gateway
       RouteTableIds:
         - !Ref PrivateRouteTable
+        - !Ref PublicRouteTable
 
   # Security Group for Interface Endpoints
   VPCEndpointSecurityGroup:
@@ -370,6 +383,46 @@ Resources:
         - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
 
+  # SSM Interface Endpoints
+  SSMVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateSSMEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnetA
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  SSMMessagesVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateSSMEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssmmessages'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnetA
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
+  EC2MessagesVPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: CreateSSMEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ec2messages'
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref PrivateSubnetA
+      SecurityGroupIds:
+        - !Ref VPCEndpointSecurityGroup
+      PrivateDnsEnabled: true
+
 Outputs:
   VpcId:
     Description: 'VPC ID'
@@ -437,6 +490,21 @@ Outputs:
     Description: 'Interface Endpoint ID for CloudFormation'
     Condition: CreateCloudFormationEndpoint
     Value: !Ref CloudFormationVPCEndpoint
+
+  VpcInterfaceEndpointForSSM:
+    Description: 'Interface Endpoint ID for SSM'
+    Condition: CreateSSMEndpoints
+    Value: !Ref SSMVPCEndpoint
+
+  VpcInterfaceEndpointForSSMMessages:
+    Description: 'Interface Endpoint ID for SSM Messages'
+    Condition: CreateSSMEndpoints
+    Value: !Ref SSMMessagesVPCEndpoint
+
+  VpcInterfaceEndpointForEC2Messages:
+    Description: 'Interface Endpoint ID for EC2 Messages'
+    Condition: CreateSSMEndpoints
+    Value: !Ref EC2MessagesVPCEndpoint
 
   'Fn::ForEach::PublicSubnetCidrOutputs':
     - SubnetName

@@ -1,3 +1,5 @@
+# Copyright 2023-2026 The MathWorks, Inc.
+
 name: Publish IaC Templates
 
 on:
@@ -39,6 +41,9 @@ jobs:
       - name: Test directory structure
         run: |
           for MODULE in *; do
+            case "$MODULE" in
+              test_utils) continue ;;
+            esac
             if [[ -d "${MODULE}" ]]; then
               (
                 cd "${MODULE}"
@@ -104,6 +109,9 @@ jobs:
       - name: Publish templates to S3
         run: |
           for MODULE in *; do
+            case "$MODULE" in
+              test_utils) continue ;;
+            esac
             if [[ -d "${MODULE}" ]]; then
               (
                 cd "${MODULE}"

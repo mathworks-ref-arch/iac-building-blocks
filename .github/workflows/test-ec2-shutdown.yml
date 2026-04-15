@@ -1,0 +1,29 @@
+# Copyright 2026 The MathWorks, Inc
+
+name: EC2 Shutdown Lambda Tests
+
+on:
+  pull_request:
+    branches:
+      - main 
+    paths:
+      - 'aws/ec2-shutdown-lambda/v1/**'
+      - 'aws/test_utils/**'
+      - '.github/workflows/test-ec2-shutdown.yml'
+      - '.github/workflows/lambda-test-template.yml'
+  push:
+    branches:
+      - main 
+    paths:
+      - 'aws/ec2-shutdown-lambda/**'
+      - 'aws/test_utils/**'
+      - '.github/workflows/test-ec2-shutdown.yml'
+      - '.github/workflows/lambda-test-template.yml'
+jobs:
+  test:
+    uses: ./.github/workflows/lambda-test-template.yml
+    with:
+      lambda_name: 'ec2-shutdown-lambda'
+      working_directory: 'aws/ec2-shutdown-lambda/v1/'
+      test_file: 'test-ec2-shutdown-lambda.py'
+

@@ -1,0 +1,29 @@
+# Copyright 2026 The MathWorks, Inc
+
+name: EBS Snapshot Lambda Tests
+
+on:
+  pull_request:
+    branches:
+      - main 
+    paths:
+      - 'aws/ebs-snapshot-lambda/v1/**'
+      - 'aws/test_utils/**'
+      - '.github/workflows/test-ebs-snapshot.yml'
+      - '.github/workflows/lambda-test-template.yml'
+  push:
+    branches:
+      - main 
+    paths:
+      - 'aws/ebs-snapshot-lambda/**'
+      - 'aws/test_utils/**'
+      - '.github/workflows/test-ebs-snapshot.yml'
+      - '.github/workflows/lambda-test-template.yml'
+
+jobs:
+  test:
+    uses: ./.github/workflows/lambda-test-template.yml
+    with:
+      lambda_name: 'ebs-snapshot-lambda'
+      working_directory: 'aws/ebs-snapshot-lambda/v1/'
+      test_file: 'test-ebs-snapshot-lambda.py'

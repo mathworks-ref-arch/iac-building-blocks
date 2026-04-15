@@ -1,3 +1,6 @@
+---
+# Copyright 2025 The MathWorks, Inc
+
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Creates EBS snapshot of an EC2 volume when stack is deleted.
 

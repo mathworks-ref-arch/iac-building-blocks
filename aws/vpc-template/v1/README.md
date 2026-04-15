@@ -1,14 +1,9 @@
 # Amazon Virtual Private Cloud (VPC) CloudFormation Template for MATLAB Reference Architectures
 
-To create a virtual private cloud (VPC) for deploying MATLAB or MATLAB Parallel Server on AWS, use the CloudFormation template [vpc-template.yml](vpc-template.yml) in this folder. 
-
-## Overview
-
-You can use this CloudFormation template to:
+This Infrastructure as Code (IaC) building block allows you to create a virtual private cloud (VPC) for deploying MATLAB or MATLAB Parallel Server on AWS. You can use the CloudFormation template [vpc-template.yml](vpc-template.yml) in this folder to:
 
 - Deploy [MATLAB on AWS](https://github.com/mathworks-ref-arch/matlab-on-aws) in a private network.
 - Deploy [MATLAB Parallel Server on AWS](https://github.com/mathworks-ref-arch/matlab-parallel-server-on-aws) in a private network.
-
 
 The CloudFormation template creates these resources:
 
@@ -29,6 +24,7 @@ The CloudFormation template creates these resources:
 | **CloudWatch Logs Interface Endpoint** | Optional VPC Interface Endpoint for CloudWatch Logs (`com.amazonaws.<region>.logs`) deployed in PrivateSubnetA |
 | **EC2 Auto Scaling Interface Endpoint** | Optional VPC Interface Endpoint for EC2 Auto Scaling (`com.amazonaws.<region>.autoscaling`) deployed in PrivateSubnetA |
 | **CloudFormation Interface Endpoint** | Optional VPC Interface Endpoint for CloudFormation (`com.amazonaws.<region>.cloudformation`) deployed in PrivateSubnetA |
+| **SSM Interface Endpoints** | Optional VPC Interface Endpoints for SSM services (`com.amazonaws.<region>.ssm`, `com.amazonaws.<region>.ec2messages` and `com.amazonaws.<region>.ssmmessages`) deployed in PrivateSubnetA |
 | **Interface Endpoints Security Group** | Security group for interface endpoints allowing inbound HTTPS traffic from the VPC CIDR block |
 
 The created VPC has this architecture:
@@ -37,12 +33,11 @@ The created VPC has this architecture:
 
 ## Instructions
 
-For general instructions on creating a new stack using a CloudFormation template, see  
-See [Creating a Stack (AWS CloudFormation Documentation)](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-console-create-stack.html).
+For general instructions on creating a new stack using a CloudFormation template, see the AWS documentation on [Create a stack from the CloudFormation console](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cfn-console-create-stack.html).
 
 You can either use the template from this folder directly, or you can use the S3 link:
 ```
-https://mathworks-reference-architectures-templates.s3.amazonaws.com/vpc-template/v1/0/1/vpc-template.yml
+https://mathworks-reference-architectures-templates.s3.amazonaws.com/vpc-template/v1/1/0/vpc-template.yml
 ```
 
 MathWorks recommends these practices:

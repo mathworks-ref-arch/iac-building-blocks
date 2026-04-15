@@ -1,0 +1,4 @@
+pytest
+boto3
+moto
+-r ../../../test_utils/requirements.txt

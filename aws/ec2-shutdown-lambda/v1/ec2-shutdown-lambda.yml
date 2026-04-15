@@ -1,5 +1,5 @@
 ---
-# Copyright 2024 The MathWorks, Inc.
+# Copyright 2024-2026 The MathWorks, Inc.
 
 AWSTemplateFormatVersion: '2010-09-09'
 Description: MathWorks Reference Architecture - EC2 Instance Shutdown Template - Automates the shutdown of an EC2 instance after a few hours.
@@ -126,6 +126,11 @@ Resources:
                       - !Ref MathWorksProductId
               - Effect: Allow
                 Action:
+                  - ec2:DescribeTags
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+              - Effect: Allow
+                Action:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
@@ -144,49 +149,97 @@ Resources:
         ZipFile: |
           import boto3
           import os
-          from datetime import datetime, timedelta
+          from datetime import datetime, timedelta, UTC
+          from botocore.exceptions import ClientError
+          from typing import Dict, Any, Optional
 
           ec2 = boto3.client('ec2')
 
-          def handler(event, context):
-              instance_id = os.environ['EC2_INSTANCE_ID']
-              shutdown_behaviour = os.environ['SHUTDOWN_BEHAVIOUR']
-              tag_to_monitor = os.environ['TAG_TO_MONITOR']
+          def get_instance(instance_id: str) -> Optional[Dict[str, Any]]:
+              """
+              Retrieve EC2 instance details. 
+              Returns the instance object if found, None otherwise.
+              """
+              try:
+                  response: Dict[str, Any] = ec2.describe_instances(InstanceIds=[instance_id])
+                  if len(response['Reservations']) == 0 or len(response['Reservations'][0]['Instances']) == 0:
+                      print(f"No instance found with the provided EC2 Instance ID: {instance_id}")
+                      return None
+                  
+                  instance: Dict[str, Any] = response['Reservations'][0]['Instances'][0]
+                  return instance
 
-              response = ec2.describe_instances(InstanceIds=[instance_id])
-              if len(response['Reservations']) == 0 or len(response['Reservations'][0]['Instances']) == 0:
-                print(f"No instance found with the provided EC2 Instance ID: {instance_id}")
-                return
-        
-              instance = response['Reservations'][0]['Instances'][0]
-              state = instance['State']['Name']
 
+
+              # Handle case where an invalid or non-existent instance ID is provided
+              except ClientError as e:
+                  print(f"Invalid or non-existent EC2 Instance ID: {instance_id}. Error: {e}")
+                  return None
+
+          def is_instance_running(instance_response: Dict[str, Any]) -> bool:
+              """
+              Check if the instance is in a state where shutdown actions can be performed.
+              Returns True if the instance is running, False otherwise.
+              """
+              state: str = instance_response['State']['Name']
               if state != 'running':
-                  print("EC2 instance is not in running state, skipping any action.")
+                  print(f"EC2 instance is not in running state (current state: {state}), skipping any action.")
+                  return False
+              return True
+
+          def shutdown_instance(instance_id: str, tag_to_monitor: str) -> None:
+              """
+              Stop the EC2 instance and remove the shutdown tag.
+              """
+              print(f"Stopping EC2 instance {instance_id}")
+              ec2.stop_instances(InstanceIds=[instance_id])
+              print(f"EC2 instance {instance_id} has been stopped.")
+              
+              ec2.delete_tags(Resources=[instance_id], Tags=[{'Key': tag_to_monitor}])
+              print(f"The tag {tag_to_monitor} has been removed from EC2 instance {instance_id}.")
+
+          def set_shutdown_tag(instance_id: str, tag_to_monitor: str, hours: int) -> None:
+              """
+              Set the shutdown tag with the calculated shutdown time.
+              """
+              shutdown_time: datetime = datetime.now(UTC).replace(tzinfo=None) + timedelta(hours=hours)
+              tag_timestamp: str = shutdown_time.strftime('%a, %d %b %Y %H:%M:%S GMT')
+              
+              remaining_minutes: int = int((shutdown_time - datetime.now(UTC).replace(tzinfo=None)).total_seconds() // 60)
+              print(f"Adding the tag {tag_to_monitor} with value {tag_timestamp}. EC2 instance is set to stop after {remaining_minutes} minutes.")
+              ec2.create_tags(Resources=[instance_id], Tags=[{'Key': tag_to_monitor, 'Value': tag_timestamp}])
+
+          def handler(event: Dict[str, Any], context: Any) -> None:
+              instance_id: str = os.environ['EC2_INSTANCE_ID']
+              shutdown_behaviour: str = os.environ['SHUTDOWN_BEHAVIOUR']
+              tag_to_monitor: str = os.environ['TAG_TO_MONITOR']
+
+              instance: Optional[Dict[str, Any]] = get_instance(instance_id)
+              if not instance:
+                  # If an instance is not found, an error string will be printed by get_instance().
                   return
               
-              tags = {tag['Key']: tag['Value'] for tag in instance.get('Tags', [])}
+              if not is_instance_running(instance):
+                  # If an instance is not running, an error string will be printed by is_instance_running() containing the current state.
+                  return
+              
+              tags: Dict[str, str] = {tag['Key']: tag['Value'] for tag in instance.get('Tags', [])}
               
               if tag_to_monitor in tags:
-                  shutdown_time = datetime.strptime(tags[tag_to_monitor],'%a, %d %b %Y %H:%M:%S GMT')
-                  if datetime.utcnow() >= shutdown_time:
-                      print("stopping ec2 instance", instance_id)
-                      ec2.stop_instances(InstanceIds=[instance_id])
-                      print(f"EC2 instance {instance_id} has been stopped.")
-                      ec2.delete_tags(Resources=[instance_id], Tags=[{'Key': tag_to_monitor}])
-                      print(f"The tag {tag_to_monitor} has been removed from EC2 instance {instance_id}.")
-                      
+                  shutdown_time: datetime = datetime.strptime(tags[tag_to_monitor], '%a, %d %b %Y %H:%M:%S GMT')
+                  
+                  if datetime.now(UTC).replace(tzinfo=None) >= shutdown_time:
+                      shutdown_instance(instance_id, tag_to_monitor)
                   else:
-                      print(f"No action needed. EC2 instance {instance_id} will shut down at {shutdown_time}. Remaining minutes: {(shutdown_time - datetime.utcnow()).total_seconds() // 60 % 60}")
+                      remaining_minutes: int = int((shutdown_time - datetime.now(UTC).replace(tzinfo=None)).total_seconds() // 60)
+                      print(f"No action needed. EC2 instance {instance_id} will shut down at {shutdown_time}. Remaining minutes: {remaining_minutes}")
               else:
                   if shutdown_behaviour == 'Never':
-                    print(f"Shutdown behavior parameter is set to Never, and there is no '{tag_to_monitor}' tag. Skipping ...")
-                    return
-                  hours = int(shutdown_behaviour.split(' ')[1])
-                  shutdown_time = datetime.utcnow() + timedelta(hours=hours)
-                  tag_timestamp = datetime.strftime(shutdown_time, '%a, %d %b %Y %H:%M:%S GMT')
-                  print(f"Adding the tag {tag_to_monitor} with value {tag_timestamp}. EC2 instance is set to stop after {(shutdown_time - datetime.utcnow()).total_seconds() // 60 % 60} minutes.")
-                  ec2.create_tags(Resources=[instance_id], Tags=[{'Key': tag_to_monitor, 'Value': tag_timestamp}])
+                      print(f"Shutdown behavior parameter is set to Never, and there is no '{tag_to_monitor}' tag. Skipping...")
+                      return
+                  
+                  hours: int = int(shutdown_behaviour.split(' ')[1])
+                  set_shutdown_tag(instance_id, tag_to_monitor, hours)
 
       Runtime: python3.12
       Timeout: 60

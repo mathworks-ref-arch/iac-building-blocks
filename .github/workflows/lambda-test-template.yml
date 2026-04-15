@@ -1,0 +1,43 @@
+# Copyright 2026 The MathWorks, Inc
+
+name: Lambda Test Template (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      lambda_name:
+        required: true
+        type: string
+        description: 'Lambda function name (e.g., ebs-snapshot-lambda)'
+      working_directory:
+        required: true
+        type: string
+        description: 'Working directory for tests'
+      test_file:
+        required: true
+        type: string
+        description: 'Test file to run (e.g., test-ebs-snapshot-lambda.py)'
+
+jobs:
+  unit-tests:
+    runs-on: ${{ fromJSON(github.repository == 'mathworks-ref-arch/iac-building-blocks' && '["ubuntu-latest"]' || '["self-hosted", "runner-source=AWS", "Linux", "X64"]') }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ vars.TEST_TOOLING_PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r tests/requirements.txt
+
+    - name: Run unit tests
+      run: |
+        pytest -v -s tests/${{ inputs.test_file }}
