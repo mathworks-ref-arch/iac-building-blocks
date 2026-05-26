@@ -169,8 +169,6 @@ Resources:
                   instance: Dict[str, Any] = response['Reservations'][0]['Instances'][0]
                   return instance
 
-
-
               # Handle case where an invalid or non-existent instance ID is provided
               except ClientError as e:
                   print(f"Invalid or non-existent EC2 Instance ID: {instance_id}. Error: {e}")
@@ -219,19 +217,35 @@ Resources:
                   # If an instance is not found, an error string will be printed by get_instance().
                   return
               
-              if not is_instance_running(instance):
-                  # If an instance is not running, an error string will be printed by is_instance_running() containing the current state.
-                  return
-              
+              instance_last_start_time = instance.get('LaunchTime')
               tags: Dict[str, str] = {tag['Key']: tag['Value'] for tag in instance.get('Tags', [])}
               
+              if not is_instance_running(instance):
+                  # Delete the shutdown tag if it exists
+                  if tag_to_monitor in tags:
+                      ec2.delete_tags(Resources=[instance_id],Tags=[{'Key': tag_to_monitor}])
+                      print(f"Removed {tag_to_monitor} tag from EC2 instance {instance_id} (instance not running).")
+                  return
+
               if tag_to_monitor in tags:
                   shutdown_time: datetime = datetime.strptime(tags[tag_to_monitor], '%a, %d %b %Y %H:%M:%S GMT')
                   
-                  if datetime.now(UTC).replace(tzinfo=None) >= shutdown_time:
+                  if instance_last_start_time is None:
+                      print("LaunchTime of EC2 instance is None, skipping comparison with shutdown_time.")
+                      return
+
+                  instance_last_start_time_naive = instance_last_start_time.replace(tzinfo=None)
+
+                  # Stale tag: instance was restarted after the scheduled shutdown time, skip action
+                  if instance_last_start_time_naive >= shutdown_time:
+                      print(f"Shutdown tag is stale (instance started at {instance_last_start_time_naive}, shutdown was scheduled for {shutdown_time}). Skipping.")
+                      return
+                  
+                  now = datetime.now(UTC).replace(tzinfo=None)
+                  if now >= shutdown_time:
                       shutdown_instance(instance_id, tag_to_monitor)
                   else:
-                      remaining_minutes: int = int((shutdown_time - datetime.now(UTC).replace(tzinfo=None)).total_seconds() // 60)
+                      remaining_minutes: int = int((shutdown_time - now).total_seconds() // 60)
                       print(f"No action needed. EC2 instance {instance_id} will shut down at {shutdown_time}. Remaining minutes: {remaining_minutes}")
               else:
                   if shutdown_behaviour == 'Never':
