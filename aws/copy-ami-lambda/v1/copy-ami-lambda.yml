@@ -177,7 +177,7 @@ Outputs:
     Condition: ShowDeploymentLink
     Description: Launch a new cluster stack using the copied AMI in your account. This link will open the CloudFormation console to create a new stack, with the custom AMI ID prepopulated. You should only click this link when the AMI is ready, which may take 5-15 minutes.
     Value: !Sub
-      - "https://${AWS::Region}.console.aws.amazon.com/cloudformation/home?region=${AWS::Region}#/stacks/create/review?templateURL=${MWTemplateUrl}&param_customAmiId=${CopiedAmiId}&param_InstanceAmiCustom=${CopiedAmiId}"
+      - "https://${AWS::Region}.console.aws.amazon.com/cloudformation/home?region=${AWS::Region}#/stacks/create/review?templateURL=${MWTemplateUrl}&param_CustomAmiId=${CopiedAmiId}&param_InstanceAmiCustom=${CopiedAmiId}"
       - 
         MWTemplateUrl: !Ref MWTemplateUrl
         CopiedAmiId: !GetAtt AmiCopyTrigger.CopiedAmiId
