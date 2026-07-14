@@ -1,0 +1,62 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Module: Commit Release Files'
+
+on:
+  workflow_call:
+    inputs:
+      target_versions:
+        required: true
+        type: string
+      s3_bucket_url:
+        required: true
+        type: string
+      dual_repo_url:
+        required: true
+        type: string
+      artifacts_path:
+        required: true
+        type: string
+      release_template_name_pattern:
+        required: true
+        type: string
+
+jobs:
+  commit-files:
+    name: Update Repo Files
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: ${{ inputs.artifacts_path }}
+
+      - name: Flatten Artifacts
+        shell: bash
+        run: |
+          # Flatten the artifact structure so the script finds them easily
+          find ${{ inputs.artifacts_path }} -name "${{ inputs.release_template_name_pattern }}" -exec mv {} ${{ inputs.artifacts_path }}/ \;
+
+      - name: Generate Release Files
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/process-release-files@main
+        with:
+          target_versions: ${{ inputs.target_versions }}
+          artifact_path: '${{ inputs.artifacts_path }}'
+          s3_bucket_url: ${{ inputs.s3_bucket_url }}
+          dual_repo_url: ${{ inputs.dual_repo_url }}
+          python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
+
+      - name: Commit and Push
+        uses: stefanzweifel/git-auto-commit-action@v6
+        with:
+          commit_message: "Automated update of release artifacts and documentation"
+          file_pattern: 'releases/ README.md LICENSE.md permission.md SECURITY.md'
+          branch: 'test-branch-${{ github.run_number }}'
+          create_branch: true

@@ -1,0 +1,104 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Module: GitHub Release'
+
+on:
+  workflow_call:
+    inputs:
+      release_files_pattern:
+        required: true
+        type: string
+      release_tag:
+        required: true
+        type: string
+      release_title:
+        required: true
+        type: string
+      prerelease:
+        required: true
+        type: boolean
+      generate_attestations:
+        required: true
+        type: boolean
+
+jobs:
+  gh-release:
+    name: Publish GH Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # Required to create the release
+      id-token: write       # Required for attestation signing
+      attestations: write   # Required to store attestations
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: ./artifacts
+
+      - name: Archive and Zip Artifacts
+        id: files
+        shell: bash
+        run: |
+          mkdir -p release_assets
+
+          find ./artifacts -type f -name "${{ inputs.release_files_pattern }}" -exec mv {} ./artifacts/ \;
+
+          VERSIONS=$(ls ./artifacts | grep -oE '^R20[0-9]{2}[ab]' | sort | uniq)
+
+          if [ -z "$VERSIONS" ]; then
+            echo "::error::No version-prefixed artifacts found matching pattern 'R20XX[ab]*' in ./artifacts/"
+            echo "Contents of artifacts directory:"
+            ls -la ./artifacts/
+            exit 1
+          fi
+
+          echo "Found versions: $VERSIONS"
+          ls artifacts
+
+          for VER in $VERSIONS; do
+            echo "Zipping artifacts for $VER..."
+            zip -j "release_assets/${VER}-artifacts.zip" ./artifacts/${VER}*
+          done
+
+          echo "Prepared Zips:"
+          ls -l release_assets/
+
+      - name: Generate Artifact Attestation
+        if: inputs.generate_attestations
+        id: attest
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: "release_assets/*.zip"
+
+      - name: Generate Body Text
+        id: body
+        shell: bash
+        env:
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          TEXT="## Automated Build Release"
+          TEXT="${TEXT}\n\n**Build Tag:** \`${{ inputs.release_tag }}\`"
+          TEXT="${TEXT}\n**Date:** $(date)"
+
+          if [[ -n "$ATTESTATION_URL" ]]; then
+             TEXT="${TEXT}\n\n### 🔐 Security Attestations"
+             TEXT="${TEXT}\nThis release includes SLSA provenance attestations verified by GitHub."
+             TEXT="${TEXT}\n- [View Attestation Details]($ATTESTATION_URL)"
+          fi
+
+          echo "release_body<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$TEXT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          name: ${{ inputs.release_title || inputs.release_tag }}
+          body: ${{ steps.body.outputs.release_body }}
+          files: release_assets/*.zip
+          prerelease: ${{ inputs.prerelease }}
+          fail_on_unmatched_files: true

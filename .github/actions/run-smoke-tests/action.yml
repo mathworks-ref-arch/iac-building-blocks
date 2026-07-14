@@ -1,0 +1,54 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Run Smoke Tests'
+description: 'Runs pytest-based smoke tests against a live CloudFormation stack deployment.'
+
+inputs:
+  region:
+    description: 'AWS region where the stack is deployed'
+    required: true
+  stack_name:
+    description: 'Name of the deployed CloudFormation stack to test against'
+    required: true
+  matlab_license_string:
+    description: 'MATLAB license string for product activation during tests'
+    required: true
+  python_version:
+    description: 'Python version to set up for running the tests'
+    required: false
+    default: '3.11'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate Test Directory
+      shell: bash
+      run: |
+        if [ ! -d "tests/e2e" ]; then
+          echo "::error::Test directory not found at 'tests/e2e'"
+          exit 1
+        fi
+        if [ ! -f "tests/e2e/requirements.txt" ]; then
+          echo "::error::requirements.txt not found in 'tests/e2e'"
+          exit 1
+        fi
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        python3 -m pip install --upgrade pip
+        python3 -m pip install -r tests/e2e/requirements.txt
+
+    - name: Run Pytest
+      id: run-tests
+      shell: bash
+      env:
+        MATLAB_LICENSE_STRING: ${{ inputs.matlab_license_string }}
+      run: |
+        pytest tests/e2e \
+          --stack-name="${{ inputs.stack_name }}" \
+          --aws-region="${{ inputs.region }}"

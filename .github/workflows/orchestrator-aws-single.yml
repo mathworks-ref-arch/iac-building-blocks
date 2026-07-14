@@ -1,0 +1,109 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Orchestrator: Single Version AWS Pipeline'
+
+on:
+  workflow_call:
+    inputs:
+      matlab_version:
+        description: |
+          The MATLAB release version to build. Used to locate the
+          per-version variable file and name artifacts/outputs.
+          Example: "R2026a", "R2025b"
+        required: true
+        type: string
+      refarch_type:
+        description: |
+          Deployment architecture type (product and OS combination).
+          Determines platform-specific configuration for build, test,
+          and release stages.
+          Valid values: matlab-linux, matlab-windows, ps-linux, ps-windows, nlm-linux
+        required: true
+        type: string
+      is_supplementary_build:
+        description: |
+          When true, skips the release stage. Use for builds that only
+          need build+test without publishing — e.g., validation builds
+          on feature branches or secondary builds where another pipeline
+          owns release.
+        required: true
+        type: boolean
+      packer_dir:
+        description: |
+          Relative path to the directory containing Packer build
+          configuration and per-version variable files.
+          Example: "packer/v1", "infra/packer"
+        required: false
+        type: string
+        default: 'packer/v1'
+      metatemplate_file_path:
+        description: |
+          Relative path to the CloudFormation meta-template file. This
+          template is used to produce the final release and test templates
+          by injecting region and configuration data.
+          Example: "src/aws-matlab-template.json", "src/meta-template.json"
+        required: false
+        type: string
+        default: 'src/meta-template.json'
+      skip_build:
+        description: |
+          When true, uses mock build mode: reads an existing AMI ID from
+          a previous release instead of running a new build. Useful for
+          testing downstream stages without incurring build costs.
+        required: false
+        type: boolean
+        default: false
+      skip_test:
+        description: |
+          When true, skips the smoke test stage entirely. The pipeline
+          goes directly from build to release (if applicable). Useful
+          during rapid iteration or when testing infrastructure is
+          unavailable.
+        required: false
+        type: boolean
+        default: false
+      lambda_injections:
+        description: |
+          JSON object mapping Lambda resource logical IDs in the
+          CloudFormation template to source files to embed in their
+          Code.ZipFile fields. Pass '{}' or omit when the template
+          has no Lambda code to inject.
+          Example: '{"AttachInstanceProfileLambda": "src/attachinstanceprofile.py"}'
+        required: false
+        type: string
+        default: '{}'
+
+jobs:
+  build:
+    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-aws-packer-build.yml@main
+    with:
+      matlab_version: ${{ inputs.matlab_version }}
+      skip_build: ${{ inputs.skip_build }}
+      packer_dir: ${{ inputs.packer_dir }}
+    secrets: inherit
+
+  smoke-test:
+    if: ${{ inputs.skip_test == false }}
+    needs: build
+    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-aws-smoke-test.yml@main
+    with:
+      ami_id: ${{ needs.build.outputs.ami_id }}
+      refarch_type: ${{ inputs.refarch_type }}
+      matlab_version: ${{ inputs.matlab_version }}
+      region: ${{ needs.build.outputs.region }}
+      metatemplate_file_path: ${{ inputs.metatemplate_file_path }}
+      lambda_injections: ${{ inputs.lambda_injections }}
+    secrets: inherit
+
+  release:
+    if: ${{ inputs.is_supplementary_build == false }}
+    needs: [build, smoke-test]
+    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-aws-release.yml@main
+    with:
+      ami_id: ${{ needs.build.outputs.ami_id }}
+      refarch_type: ${{ inputs.refarch_type }}
+      matlab_version: ${{ inputs.matlab_version }}
+      source_region: ${{ needs.build.outputs.region }}
+      target_regions: ${{ vars.TARGET_REGIONS }}
+      metatemplate_file_path: ${{ inputs.metatemplate_file_path }}
+      lambda_injections: ${{ inputs.lambda_injections }}
+    secrets: inherit

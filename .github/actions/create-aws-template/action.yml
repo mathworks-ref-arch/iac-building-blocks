@@ -1,0 +1,103 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Create AWS Template'
+description: 'Generates a CloudFormation template by injecting a RegionMap.'
+
+inputs:
+  region_map:
+    description: 'JSON object string for RegionMap'
+    required: true
+  output_filename:
+    description: 'Filename for the generated template'
+    required: true
+  artifact_name:
+    description: 'Name to assign the uploaded GitHub Actions artifact (an artifact label, not a filesystem path)'
+    required: true
+  metatemplate_file_path:
+    description: 'Path to the source JSON meta-template file'
+    required: true
+  lambda_injections:
+    description: |
+      JSON object mapping Lambda resource logical IDs in the template to
+      source files whose contents are injected into Code.ZipFile.
+      Example: '{"AttachInstanceProfileLambda": "src/attachinstanceprofile.py"}'
+      Pass '{}' or omit when the template has no Lambda code to inject.
+    required: false
+    default: '{}'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate Template
+      shell: bash
+      env:
+        TEMPLATE: ${{ inputs.metatemplate_file_path }}
+        REGION_MAP: ${{ inputs.region_map }}
+        OUT_NAME: ${{ inputs.output_filename }}
+        LAMBDA_INJECTIONS: ${{ inputs.lambda_injections }}
+      run: |
+        if ! command -v jq &> /dev/null; then
+            echo "jq not found, installing..."
+            # Retry to ride out transient dpkg/apt lock contention on the runner.
+            for i in 1 2 3 4 5; do
+                sudo apt-get update && sudo apt-get install -y jq && break
+                echo "apt-get failed (attempt $i), retrying in 10s..."
+                sleep 10
+            done
+        fi
+        if ! command -v jq &> /dev/null; then
+            echo "::error::Failed to install jq"
+            exit 1
+        fi
+
+        if [ -z "$REGION_MAP" ]; then
+            echo "::error::region_map input is empty"
+            exit 1
+        fi
+        if [ ! -f "$TEMPLATE" ]; then
+            echo "::error::Meta-template not found at: $TEMPLATE"
+            exit 1
+        fi
+        if ! echo "$REGION_MAP" | jq empty 2>/dev/null; then
+            echo "::error::region_map is not valid JSON: $REGION_MAP"
+            exit 1
+        fi
+
+        echo "Injecting Region Map into template..."
+        echo "$REGION_MAP" > region_map_temp.json
+
+        jq --slurpfile map region_map_temp.json \
+           '.Mappings.RegionMap = $map[0]' \
+           "$TEMPLATE" > "$OUT_NAME"
+
+        rm region_map_temp.json
+
+        INJECTIONS="${LAMBDA_INJECTIONS:-{\}}"
+        if ! echo "$INJECTIONS" | jq -e 'type == "object"' >/dev/null 2>&1; then
+            echo "::error::lambda_injections is not a valid JSON object: $INJECTIONS"
+            exit 1
+        fi
+
+        while IFS=$'\t' read -r resource code_file; do
+            [ -z "$resource" ] && continue
+            if [ ! -f "$code_file" ]; then
+                echo "::error::Lambda code file not found for $resource: $code_file"
+                exit 1
+            fi
+            if ! jq -e --arg r "$resource" '.Resources[$r]' "$OUT_NAME" >/dev/null; then
+                echo "::error::Resource $resource not found in template $OUT_NAME"
+                exit 1
+            fi
+            echo "Injecting Lambda code into $resource from $code_file..."
+            jq --arg r "$resource" --rawfile code "$code_file" \
+               '.Resources[$r].Properties.Code.ZipFile = $code' \
+               "$OUT_NAME" > "${OUT_NAME}.tmp"
+            mv "${OUT_NAME}.tmp" "$OUT_NAME"
+        done < <(echo "$INJECTIONS" | jq -r 'to_entries[] | "\(.key)\t\(.value)"')
+
+        echo "Generated: $OUT_NAME"
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v5
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: ${{ inputs.output_filename }}

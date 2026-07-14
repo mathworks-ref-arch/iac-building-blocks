@@ -1,0 +1,106 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Module: AWS Smoke Test'
+
+on:
+  workflow_call:
+    inputs:
+      ami_id:
+        required: true
+        type: string
+      refarch_type:
+        required: true
+        type: string
+      matlab_version:
+        required: true
+        type: string
+      region:
+        required: true
+        type: string
+      metatemplate_file_path:
+        required: true
+        type: string
+      lambda_injections:
+        description: |
+          JSON object mapping Lambda resource logical IDs in the template
+          to source files to embed in their Code.ZipFile fields. Pass
+          '{}' or omit when the template has no Lambda code to inject.
+        required: false
+        type: string
+        default: '{}'
+
+env:
+  METATEMPLATE_PATH: "./${{ inputs.metatemplate_file_path }}"
+  TEMPLATE_FILENAME: "${{ inputs.matlab_version }}-test-template.json"
+  TEST_ARTIFACT_NAME: "${{ inputs.matlab_version }}-test-template"
+  STACK_NAME: "msa-gen-smoke-test-${{ inputs.refarch_type }}-${{ inputs.matlab_version }}-${{ github.run_id }}"
+  TEST_REGION_MAP: '{"${{ inputs.region }}": {"AMI": "${{ inputs.ami_id }}"}}'
+
+jobs:
+  smoke-test:
+    name: "${{ inputs.matlab_version }}: Run smoke tests"
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Validate Inputs
+        run: |
+          if [ -z "${{ inputs.region }}" ]; then
+            echo "::error::Region input is empty. The build step may have failed to produce outputs."
+            exit 1
+          fi
+          if [ -z "${{ inputs.ami_id }}" ]; then
+            echo "::error::AMI ID input is empty. The build step may have failed to produce outputs."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - name: Generate test template
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/create-aws-template@main
+        with:
+          region_map: ${{ env.TEST_REGION_MAP }}
+          ami_id: ${{ inputs.ami_id }}
+          output_filename: ${{ env.TEMPLATE_FILENAME }}
+          artifact_name: ${{ env.TEST_ARTIFACT_NAME }}
+          metatemplate_file_path: ${{ env.METATEMPLATE_PATH }}
+          lambda_injections: ${{ inputs.lambda_injections }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ inputs.region }}
+
+      - name: Deploy Infrastructure
+        id: deploy
+        timeout-minutes: 20
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/deploy-cfn@main
+        with:
+          compiled_template_file_path: ./${{ env.TEMPLATE_FILENAME }}
+          refarch_type: ${{ inputs.refarch_type }}
+          region: ${{ inputs.region }}
+          stack_name: ${{ env.STACK_NAME }}
+          vpc_id: ${{ secrets.TEST_VPC_ID }}
+          subnet_id: ${{ secrets.TEST_SUBNET_ID }}
+          key_pair_name: ${{ vars.EC2_KEY_NAME }}
+
+      - name: Run Smoke Tests
+        id: smoke-test
+        timeout-minutes: 10
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/run-smoke-tests@main
+        with:
+          region: ${{ inputs.region }}
+          stack_name: ${{ env.STACK_NAME }}
+          matlab_license_string: ${{ secrets.MATLAB_LICENSE_STRING }}
+          python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Deleting stack ${{ env.STACK_NAME }}..."
+          aws cloudformation delete-stack --stack-name ${{ env.STACK_NAME }}
+          echo "Waiting for stack deletion..."
+          if ! aws cloudformation wait stack-delete-complete --stack-name ${{ env.STACK_NAME }} 2>/dev/null; then
+            echo "::warning::Stack deletion may not have completed for ${{ env.STACK_NAME }}. Check the AWS console for orphaned resources."
+          fi

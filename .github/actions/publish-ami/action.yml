@@ -1,0 +1,70 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Publish AMI'
+description: 'Copies a source AMI to multiple regions, makes the copies public, and outputs a CloudFormation RegionMap.'
+inputs:
+  ami_id:
+    description: 'The Source AMI ID'
+    required: true
+  source_ami_region:
+    description: 'The region where the source AMI exists'
+    required: true
+  target_ami_regions:
+    description: 'Comma-separated list of regions to publish the AMI to (e.g. us-east-2,eu-west-1)'
+    required: true
+  matlab_version:
+    description: 'Used for naming the AMIs'
+    required: true
+  refarch_type:
+    description: 'Used for naming the AMIs'
+    required: true
+  test_mode:
+    description: 'If true, skips AWS calls and returns mock data'
+    required: false
+    default: true
+  python_version:
+    description: 'Python version to set up for running the publish script'
+    required: false
+    default: '3.11'
+
+outputs:
+  region_map_json:
+    description: "JSON string formatted as { RegionMap: { region: { AMI: id } } }"
+    value: ${{ steps.publish.outputs.region_map_json }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install Dependencies
+      shell: bash
+      run: |
+        pip install boto3
+
+    - name: Run Publish Script
+      id: publish
+      shell: bash
+      env:
+        INPUT_AMI: ${{ inputs.ami_id }}
+        INPUT_SRC: ${{ inputs.source_ami_region }}
+        INPUT_DEST: ${{ inputs.target_ami_regions }}
+        INPUT_VER: ${{ inputs.matlab_version }}
+        INPUT_REFARCH_TYPE: ${{ inputs.refarch_type }}
+        INPUT_TEST: ${{ inputs.test_mode }}
+      run: |
+        # Construct flag for test mode
+        TEST_FLAG=""
+        if [ "$INPUT_TEST" == "true" ]; then
+          TEST_FLAG="--test-mode"
+        fi
+
+        python ${{ github.action_path }}/publish.py \
+          --ami-id "$INPUT_AMI" \
+          --src-region "$INPUT_SRC" \
+          --dest-regions "$INPUT_DEST" \
+          --version "$INPUT_VER" \
+          --refarch-type "$INPUT_REFARCH_TYPE" \
+          $TEST_FLAG

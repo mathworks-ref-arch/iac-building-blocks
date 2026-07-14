@@ -1,0 +1,78 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Module: AWS Release Prep'
+
+on:
+  workflow_call:
+    inputs:
+      ami_id:
+        required: true
+        type: string
+      refarch_type:
+        required: true
+        type: string
+      matlab_version:
+        required: true
+        type: string
+      source_region:
+        required: true
+        type: string
+      target_regions:
+        required: true
+        type: string
+      metatemplate_file_path:
+        type: string
+      lambda_injections:
+        description: |
+          JSON object mapping Lambda resource logical IDs in the template
+          to source files to embed in their Code.ZipFile fields. Pass
+          '{}' or omit when the template has no Lambda code to inject.
+        required: false
+        type: string
+        default: '{}'
+env:
+  METATEMPLATE_PATH: "./${{ inputs.metatemplate_file_path }}"
+  TEMPLATE_FILENAME: "${{ inputs.matlab_version }}-release-template.json"
+  RELEASE_ARTIFACT_NAME: "${{ inputs.matlab_version }}-release-template"
+
+jobs:
+  prep-release:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Validate Inputs
+        run: |
+          if [ -z "${{ inputs.target_regions }}" ]; then
+            echo "::error::target_regions is empty. Set vars.TARGET_REGIONS on the calling repository."
+            exit 1
+          fi
+          if [ -z "${{ inputs.source_region }}" ]; then
+            echo "::error::source_region is empty. The build step may have failed to produce a region output."
+            exit 1
+          fi
+
+      - name: Publish AMI
+        id: publish_ami
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami@main
+        with:
+          ami_id: ${{ inputs.ami_id }}
+          source_ami_region: ${{ inputs.source_region }}
+          target_ami_regions: ${{ inputs.target_regions }}
+          matlab_version: ${{ inputs.matlab_version }}
+          refarch_type: ${{ inputs.refarch_type }}
+          test_mode: true
+          python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
+
+      - uses: actions/checkout@v5
+
+      - name: Generate Release Template
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/create-aws-template@main
+        with:
+          region_map: ${{ steps.publish_ami.outputs.region_map_json }}
+          output_filename: ${{ env.TEMPLATE_FILENAME }}
+          artifact_name: ${{ env.RELEASE_ARTIFACT_NAME }}
+          metatemplate_file_path: ${{ env.METATEMPLATE_PATH }}
+          lambda_injections: ${{ inputs.lambda_injections }}
+
+      # Future: Push template to production S3 bucket

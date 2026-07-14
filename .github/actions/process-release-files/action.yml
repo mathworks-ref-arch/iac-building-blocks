@@ -1,0 +1,56 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Process Release Files'
+description: 'Generates READMEs, organizes artifacts, and updates root files based on templates.'
+
+inputs:
+  target_versions:
+    description: 'JSON string of versions to process artifacts for'
+    required: true
+  source_path:
+    description: 'Path where templates for refarch creation are located'
+    required: false
+    default: './src'
+  artifact_path:
+    description: 'Path where artifacts are currently located'
+    required: false
+    default: './artifacts'
+  s3_bucket_url:
+    description: 'Production S3 bucket URL'
+    required: true
+  dual_repo_url:
+    description: 'URL to the sister repository (same offering, different OS)'
+    required: true
+  python_version:
+    description: 'Python version to set up for running the processing scripts'
+    required: false
+    default: '3.11'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install jinja2
+
+    - name: Run Processing Script
+      shell: bash
+      env:
+        TARGET_VERSIONS: ${{ inputs.target_versions }}
+        SOURCE_PATH: ${{ inputs.source_path }}
+        ARTIFACT_PATH: ${{ inputs.artifact_path }}
+        S3_BUCKET_URL: ${{ inputs.s3_bucket_url }}
+        DUAL_REPO_URL: ${{ inputs.dual_repo_url }}
+      run: |
+        # We execute the script located in THIS action's directory
+        python ${{ github.action_path }}/processor.py \
+          --target-versions "$TARGET_VERSIONS" \
+          --source-path "$SOURCE_PATH" \
+          --artifact-path "$ARTIFACT_PATH" \
+          --s3-bucket-url "$S3_BUCKET_URL" \
+          --dual-repo-url "$DUAL_REPO_URL"
+

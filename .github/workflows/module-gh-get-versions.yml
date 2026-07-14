@@ -1,0 +1,42 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Utility: Calculate MATLAB Version Matrix'
+
+on:
+  workflow_call:
+    inputs:
+      input_versions:
+        description: "User provided list (e.g. R2025a,R2024b). Empty = Auto-detect."
+        required: false
+        type: string
+      search_dir:
+        description: "Directory to scan for release folders"
+        required: false
+        default: "./releases"
+        type: string
+    outputs:
+      matrix:
+        description: "The JSON array of versions"
+        value: ${{ jobs.calculate.outputs.matrix }}
+
+jobs:
+  calculate:
+    name: Generate Version Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v5
+
+      - name: Checkout iac-building-blocks scripts
+        uses: actions/checkout@v5
+        with:
+          repository: mathworks-ref-arch/iac-building-blocks
+          path: _iac-building-blocks
+
+      - name: Calculate Versions
+        id: set-matrix
+        env:
+          INPUT_STR: ${{ inputs.input_versions }}
+          TARGET_DIR: ${{ inputs.search_dir }}
+        run: python _iac-building-blocks/.github/scripts/calculate_version_matrix.py

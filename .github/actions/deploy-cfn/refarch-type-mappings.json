@@ -1,0 +1,58 @@
+{
+  "matlab-linux": {
+    "key_param": "SSHKeyName",
+    "vpc_param": "VPC",
+    "subnet_param": "Subnet",
+    "client_ip_param": "ClientIPAddress",
+    "defaults": [
+      { "ParameterKey": "InstanceType", "ParameterValue": "t3.medium" },
+      { "ParameterKey": "AutoShutdown", "ParameterValue": "Never" }
+    ]
+  },
+  "matlab-windows": {
+    "key_param": "RDPKeyName",
+    "vpc_param": "VPC",
+    "subnet_param": "Subnet",
+    "client_ip_param": "ClientIPAddress",
+    "defaults": [
+      { "ParameterKey": "InstanceType", "ParameterValue": "t3.xlarge" },
+      { "ParameterKey": "AutoShutdown", "ParameterValue": "After 1 hour" }
+    ]
+  },
+  "ps-linux": {
+    "key_param": "SSHKeyName",
+    "vpc_param": "VPC",
+    "subnet_param": "Subnets",
+    "client_ip_param": "ClientIPAddress",
+    "defaults": [
+      { "ParameterKey": "HeadnodeInstanceType", "ParameterValue": "t3.medium" },
+      { "ParameterKey": "WorkerInstanceType", "ParameterValue": "t3.medium" },
+      { "ParameterKey": "NumWorkerNodes", "ParameterValue": "1" },
+      { "ParameterKey": "SharedEBSVolumeSize", "ParameterValue": "32" },
+      { "ParameterKey": "ClusterName", "ParameterValue": "SmokeTestLinux" }
+    ]
+  },
+  "ps-windows": {
+    "key_param": "RDPKeyName",
+    "vpc_param": "VPC",
+    "subnet_param": "Subnets",
+    "client_ip_param": "ClientIPAddress",
+    "defaults": [
+      { "ParameterKey": "HeadnodeInstanceType", "ParameterValue": "t3.xlarge" },
+      { "ParameterKey": "WorkerInstanceType", "ParameterValue": "t3.xlarge" },
+      { "ParameterKey": "NumWorkerNodes", "ParameterValue": "1" },
+      { "ParameterKey": "DatabaseVolumeSize", "ParameterValue": "32" },
+      { "ParameterKey": "ClusterName", "ParameterValue": "SmokeTestWin" }
+    ]
+  },
+  "nlm-linux": {
+    "key_param": "SSHKeyName",
+    "vpc_param": "VPC",
+    "subnet_param": "Subnet",
+    "client_ip_param": "ClientIPAddress",
+    "defaults": [
+      { "ParameterKey": "ServerInstanceType", "ParameterValue": "t3.micro" },
+      { "ParameterKey": "EnablePublicIPAddress", "ParameterValue": "Yes" }
+    ]
+  }
+}

@@ -1,0 +1,139 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Module: Packer Build (AWS)'
+
+on:
+  workflow_call:
+    inputs:
+      packer_dir:
+        type: string
+      matlab_version:
+        required: true
+        type: string
+      skip_build:
+        description: 'Mock the build for testing'
+        type: boolean
+    outputs:
+      ami_id:
+        description: "The ID of the built AMI"
+        value: ${{ jobs.build.outputs.ami_id }}
+      region:
+        description: "The region where the AMI was built"
+        value: ${{ jobs.build.outputs.region }}
+env:
+    PACKER_VERSION: ${{ vars.PACKER_VERSION || '1.15.4' }}
+    PACKER_MANIFEST_FILENAME: "${{ inputs.matlab_version }}-manifest.json"
+    PACKER_LOG_FILENAME: "${{ inputs.matlab_version }}-packer-build.log"
+    PACKER_ARTIFACT_NAME: "${{ inputs.matlab_version }}-packer-artifacts"
+    PACKER_RELEASE_CONFIG: "release-config/${{ inputs.matlab_version }}.pkrvars.hcl"
+
+jobs:
+  build:
+    name: "${{ inputs.matlab_version }}: Packer Build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      ami_id: ${{ steps.export.outputs.ami_id }}
+      region: ${{ steps.export.outputs.region }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure AWS Credentials
+        if: inputs.skip_build == false
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-duration-seconds: ${{ vars.AWS_ROLE_DURATION_SECONDS || 7200 }}
+
+      - name: Setup Packer
+        if: inputs.skip_build == false
+        uses: hashicorp/setup-packer@v3
+        with:
+          version: ${{ env.PACKER_VERSION }}
+
+      - name: Run Packer Build
+        if: inputs.skip_build == false
+        working-directory: ${{ inputs.packer_dir }}
+        run: |
+          packer init .
+          packer build -color=false \
+            -var "MANIFEST_OUTPUT_FILE=${{ env.PACKER_MANIFEST_FILENAME }}" \
+            -var-file=${{ env.PACKER_RELEASE_CONFIG }} \
+            . | tee ${{ env.PACKER_LOG_FILENAME }}
+
+      - name: Mock Build
+        if: inputs.skip_build == true
+        working-directory: ${{ inputs.packer_dir }}
+        run: |
+          # jq is normally pre-installed on ubuntu-latest, but it is not a
+          # guaranteed part of the runner image, so install it if missing.
+          # Retry to ride out transient dpkg/apt lock contention.
+          if ! command -v jq &> /dev/null; then
+            echo "jq not found, installing..."
+            for i in 1 2 3 4 5; do
+              sudo apt-get update && sudo apt-get install -y jq && break
+              echo "apt-get failed (attempt $i), retrying in 10s..."
+              sleep 10
+            done
+          fi
+          if ! command -v jq &> /dev/null; then
+            echo "::error::Failed to install jq. Cannot parse release template."
+            exit 1
+          fi
+
+          REGION="${{ vars.AWS_REGION }}"
+          if [ -z "$REGION" ]; then
+            echo "::error::vars.AWS_REGION is not set on this repository. Set it under Settings > Secrets and variables > Variables."
+            exit 1
+          fi
+
+          RELEASE_TEMPLATE="${GITHUB_WORKSPACE}/releases/${{ inputs.matlab_version }}/aws-matlab-template.json"
+          if [ ! -f "$RELEASE_TEMPLATE" ]; then
+            echo "::error::Release template not found: $RELEASE_TEMPLATE. Ensure releases/${{ inputs.matlab_version }}/aws-matlab-template.json exists."
+            exit 1
+          fi
+
+          AMI_ID=$(jq -r --arg region "$REGION" '.Mappings.RegionMap[$region].AMI' "$RELEASE_TEMPLATE")
+          if [ -z "$AMI_ID" ] || [ "$AMI_ID" == "null" ]; then
+            AVAILABLE=$(jq -r '.Mappings.RegionMap | keys | join(", ")' "$RELEASE_TEMPLATE")
+            echo "::error::No AMI found for region '$REGION' in $RELEASE_TEMPLATE. Available regions: $AVAILABLE"
+            exit 1
+          fi
+
+          echo "Using AMI $AMI_ID from $RELEASE_TEMPLATE for region $REGION"
+          echo "Mock Build Log" > ${{ env.PACKER_LOG_FILENAME }}
+          echo "{\"builds\": [{\"artifact_id\": \"${REGION}:${AMI_ID}\"}]}" > ${{ env.PACKER_MANIFEST_FILENAME }}
+
+      - name: Export Outputs
+        id: export
+        working-directory: ${{ inputs.packer_dir }}
+        run: |
+          # jq is normally pre-installed on ubuntu-latest, but it is not a
+          # guaranteed part of the runner image, so install it if missing.
+          if ! command -v jq &> /dev/null; then
+            echo "jq not found, installing..."
+            for i in 1 2 3 4 5; do
+              sudo apt-get update && sudo apt-get install -y jq && break
+              echo "apt-get failed (attempt $i), retrying in 10s..."
+              sleep 10
+            done
+          fi
+          if ! command -v jq &> /dev/null; then
+            echo "::error::Failed to install jq. Cannot parse Packer manifest."
+            exit 1
+          fi
+
+          FULL_ID=$(jq -r '.builds[-1].artifact_id' ${{ env.PACKER_MANIFEST_FILENAME }})
+          echo "ami_id=$(echo $FULL_ID | cut -d':' -f2)" >> $GITHUB_OUTPUT
+          echo "region=$(echo $FULL_ID | cut -d':' -f1)" >> $GITHUB_OUTPUT
+      
+      - name: Upload Packer Artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.PACKER_ARTIFACT_NAME }}
+          path: |
+            ${{ inputs.packer_dir }}/${{ env.PACKER_MANIFEST_FILENAME }}
+            ${{ inputs.packer_dir }}/${{ env.PACKER_LOG_FILENAME }}

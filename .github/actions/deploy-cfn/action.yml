@@ -1,0 +1,154 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Deploy CloudFormation Stack'
+description: 'Downloads template, maps parameters, and deploys stack'
+
+inputs:
+  compiled_template_file_path:
+    description: "Path to the already-compiled CloudFormation template to deploy"
+    required: true
+  refarch_type:
+    description: "Deployment architecture type (e.g., ps-linux, matlab-linux)"
+    required: true
+  region:
+    description: "AWS region to deploy the stack into"
+    required: true
+  stack_name:
+    description: "Unique name for the temporary CloudFormation stack"
+    required: true
+  vpc_id:
+    description: "VPC to deploy the stack into"
+    required: true
+  subnet_id:
+    description: "Subnet to deploy the stack into"
+    required: true
+  key_pair_name:
+    description: "Name of the pre-provisioned AWS EC2 key pair for instance access"
+    required: true
+
+outputs:
+  stack_outputs:
+    description: "JSON string of stack outputs"
+    value: ${{ steps.outputs.outputs.STACK_OUTPUTS }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate Inputs
+      shell: bash
+      env:
+        REFARCH_TYPE: ${{ inputs.refarch_type }}
+        CONFIG_FILE: "${{ github.action_path }}/refarch-type-mappings.json"
+      run: |
+        if [ ! -f "$CONFIG_FILE" ]; then
+          echo "::error::refarch-type-mappings.json not found at $CONFIG_FILE"
+          exit 1
+        fi
+        if ! jq -e ".\"$REFARCH_TYPE\"" "$CONFIG_FILE" > /dev/null 2>&1; then
+          AVAILABLE=$(jq -r 'keys | join(", ")' "$CONFIG_FILE")
+          echo "::error::Unknown refarch_type '$REFARCH_TYPE'. Available types: $AVAILABLE"
+          exit 1
+        fi
+
+    - name: Get Runner Public IP
+      id: get-ip
+      shell: bash
+      run: |
+        IP=$(curl -fsS --retry 3 --max-time 10 https://checkip.amazonaws.com | tr -d '[:space:]')
+        if ! [[ "$IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Failed to resolve runner public IPv4 (got: '$IP')"
+          exit 1
+        fi
+        echo "ipv4=$IP" >> "$GITHUB_OUTPUT"
+
+    - name: Generate Stack Password
+      id: gen-password
+      shell: bash
+      run: |
+        # Build a 20-char password that satisfies all known MATLAB / NLM regexes:
+        # >=14 chars, includes upper, lower, digit, and special character.
+        UPPER=$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c1)
+        LOWER=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c1)
+        DIGIT=$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c1)
+        SPECIAL=$(LC_ALL=C tr -dc '!@#%^_+=-' < /dev/urandom | head -c1)
+        REST=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c16)
+        PASSWORD="${UPPER}${LOWER}${DIGIT}${SPECIAL}${REST}"
+        echo "::add-mask::$PASSWORD"
+        echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
+
+    - name: Prepare Parameters JSON
+      id: prep-params
+      shell: bash
+      env:
+        REFARCH_TYPE: ${{ inputs.refarch_type }}
+        VPC: ${{ inputs.vpc_id }}
+        SUBNET: ${{ inputs.subnet_id }}
+        KEY: ${{ inputs.key_pair_name }}
+        CLIENT_IP: "${{ steps.get-ip.outputs.ipv4 }}/32"
+        STACK_PASSWORD: ${{ steps.gen-password.outputs.password }}
+        CONFIG_FILE: "${{ github.action_path }}/refarch-type-mappings.json"
+      run: |
+        KEY_PARAM=$(jq -r ".\"$REFARCH_TYPE\".key_param" $CONFIG_FILE)
+        VPC_PARAM=$(jq -r ".\"$REFARCH_TYPE\".vpc_param" $CONFIG_FILE)
+        SUBNET_PARAM=$(jq -r ".\"$REFARCH_TYPE\".subnet_param" $CONFIG_FILE)
+        CLIENT_IP_PARAM=$(jq -r ".\"$REFARCH_TYPE\".client_ip_param" $CONFIG_FILE)
+
+        jq ".\"$REFARCH_TYPE\".defaults" $CONFIG_FILE > params.json
+
+        jq --arg k "$VPC_PARAM" --arg v "$VPC" '. += [{"ParameterKey": $k, "ParameterValue": $v}]' params.json > tmp.json && mv tmp.json params.json
+        jq --arg k "$SUBNET_PARAM" --arg v "$SUBNET" '. += [{"ParameterKey": $k, "ParameterValue": $v}]' params.json > tmp.json && mv tmp.json params.json
+        jq --arg k "$KEY_PARAM" --arg v "$KEY" '. += [{"ParameterKey": $k, "ParameterValue": $v}]' params.json > tmp.json && mv tmp.json params.json
+        jq --arg k "$CLIENT_IP_PARAM" --arg v "$CLIENT_IP" '. += [{"ParameterKey": $k, "ParameterValue": $v}]' params.json > tmp.json && mv tmp.json params.json
+
+        # Inject a random password for any template that asks for one. We
+        # set Password / ConfirmPassword (and never log them) so deployments
+        # do not rely on a hardcoded credential.
+        jq --arg pw "$STACK_PASSWORD" '
+          (.[] | select(.ParameterKey == "Password") | .ParameterValue) |= $pw
+          | (.[] | select(.ParameterKey == "ConfirmPassword") | .ParameterValue) |= $pw
+        ' params.json > tmp.json && mv tmp.json params.json
+
+        echo "Generated Parameters (passwords redacted by runner masking):"
+        cat params.json
+
+    - name: Deploy Stack
+      shell: bash
+      run: |
+        TEMPLATE_FILE="${{ inputs.compiled_template_file_path }}"
+        
+        if [[ ! -f "$TEMPLATE_FILE" ]]; then
+          echo "::error::Template file not found at $TEMPLATE_FILE"
+          exit 1
+        fi
+
+        aws cloudformation create-stack \
+          --stack-name ${{ inputs.stack_name }} \
+          --template-body file://"$TEMPLATE_FILE" \
+          --region ${{ inputs.region }} \
+          --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+          --parameters file://params.json
+
+        echo "Waiting for stack creation..."
+        if ! aws cloudformation wait stack-create-complete \
+          --stack-name ${{ inputs.stack_name }} \
+          --region ${{ inputs.region }} 2>&1; then
+          echo "::error::CloudFormation stack creation failed for ${{ inputs.stack_name }}"
+          aws cloudformation describe-stack-events \
+            --stack-name ${{ inputs.stack_name }} \
+            --region ${{ inputs.region }} \
+            --query "StackEvents[?ResourceStatus=='CREATE_FAILED'].[LogicalResourceId,ResourceStatusReason]" \
+            --output table
+          exit 1
+        fi
+
+    - name: Retrieve Stack Outputs
+      id: outputs
+      shell: bash
+      run: |
+        # Get Outputs as a simplified JSON object { "OutputKey": "OutputValue" }
+        OUTPUTS=$(aws cloudformation describe-stacks \
+          --stack-name ${{ inputs.stack_name }} \
+          --region ${{ inputs.region }} \
+          --query "Stacks[0].Outputs" | \
+          jq -c 'reduce .[] as $item ({}; . + {($item.OutputKey): $item.OutputValue})')
+        
+        echo "STACK_OUTPUTS=$OUTPUTS" >> $GITHUB_OUTPUT
