@@ -74,7 +74,7 @@ on:
 
 jobs:
   build:
-    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-aws-packer-build.yml@main
+    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-aws-packer-build.yml@epatel/fix-password-gen-sigpipe
     with:
       matlab_version: ${{ inputs.matlab_version }}
       skip_build: ${{ inputs.skip_build }}
@@ -84,7 +84,7 @@ jobs:
   smoke-test:
     if: ${{ inputs.skip_test == false }}
     needs: build
-    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-aws-smoke-test.yml@main
+    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-aws-smoke-test.yml@epatel/fix-password-gen-sigpipe
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       refarch_type: ${{ inputs.refarch_type }}
@@ -97,7 +97,7 @@ jobs:
   release:
     if: ${{ inputs.is_supplementary_build == false }}
     needs: [build, smoke-test]
-    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-aws-release.yml@main
+    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-aws-release.yml@epatel/fix-password-gen-sigpipe
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       refarch_type: ${{ inputs.refarch_type }}

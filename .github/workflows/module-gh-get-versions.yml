@@ -32,6 +32,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: mathworks-ref-arch/iac-building-blocks
+          ref: epatel/fix-password-gen-sigpipe
           path: _iac-building-blocks
 
       - name: Calculate Versions

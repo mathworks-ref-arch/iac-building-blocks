@@ -45,7 +45,7 @@ jobs:
           find ${{ inputs.artifacts_path }} -name "${{ inputs.release_template_name_pattern }}" -exec mv {} ${{ inputs.artifacts_path }}/ \;
 
       - name: Generate Release Files
-        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/process-release-files@main
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/process-release-files@epatel/fix-password-gen-sigpipe
         with:
           target_versions: ${{ inputs.target_versions }}
           artifact_path: '${{ inputs.artifacts_path }}'

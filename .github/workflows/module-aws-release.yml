@@ -54,7 +54,7 @@ jobs:
 
       - name: Publish AMI
         id: publish_ami
-        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami@main
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami@epatel/fix-password-gen-sigpipe
         with:
           ami_id: ${{ inputs.ami_id }}
           source_ami_region: ${{ inputs.source_region }}
@@ -67,7 +67,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Generate Release Template
-        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/create-aws-template@main
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/create-aws-template@epatel/fix-password-gen-sigpipe
         with:
           region_map: ${{ steps.publish_ami.outputs.region_map_json }}
           output_filename: ${{ env.TEMPLATE_FILENAME }}

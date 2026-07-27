@@ -82,7 +82,7 @@ jobs:
   commit-release-files:
     if: ${{ inputs.is_supplementary_build == false }}
     name: Commit release files into repository
-    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-gh-commit-files.yml@main
+    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-gh-commit-files.yml@epatel/fix-password-gen-sigpipe
     with:
       target_versions: ${{ inputs.target_versions }}
       s3_bucket_url: ${{ inputs.s3_bucket_url }}
@@ -95,7 +95,7 @@ jobs:
     needs: [commit-release-files]
     if: ${{ !cancelled() && (needs.commit-release-files.result == 'success' || needs.commit-release-files.result == 'skipped') }}
     name: Create Aggregate GH Release
-    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-gh-create-release.yml@main
+    uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-gh-create-release.yml@epatel/fix-password-gen-sigpipe
     with:
       release_files_pattern: ${{ inputs.release_files_pattern }}
       release_tag: ${{ inputs.release_tag }}
