@@ -66,12 +66,20 @@ runs:
       run: |
         # Build a 20-char password that satisfies all known MATLAB / NLM regexes:
         # >=14 chars, includes upper, lower, digit, and special character.
-        UPPER=$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c1)
-        LOWER=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c1)
-        DIGIT=$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c1)
-        SPECIAL=$(LC_ALL=C tr -dc '!@#%^_+=-' < /dev/urandom | head -c1)
-        REST=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c16)
+        # Read a bounded block from /dev/urandom before filtering: piping an
+        # unbounded stream straight into `head -c` makes `tr` die on SIGPIPE
+        # when head closes the pipe, which aborts the step under pipefail.
+        gen() { LC_ALL=C head -c 8192 /dev/urandom | LC_ALL=C tr -dc "$1" | head -c "$2"; }
+        UPPER=$(gen 'A-Z' 1)
+        LOWER=$(gen 'a-z' 1)
+        DIGIT=$(gen '0-9' 1)
+        SPECIAL=$(gen '!@#%^_+=-' 1)
+        REST=$(gen 'A-Za-z0-9' 16)
         PASSWORD="${UPPER}${LOWER}${DIGIT}${SPECIAL}${REST}"
+        if [ "${#PASSWORD}" -lt 14 ]; then
+          echo "::error::Generated password too short (${#PASSWORD} chars); entropy source may be unavailable"
+          exit 1
+        fi
         echo "::add-mask::$PASSWORD"
         echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
 
