@@ -66,12 +66,20 @@ runs:
       run: |
         # Build a 20-char password that satisfies all known MATLAB / NLM regexes:
         # >=14 chars, includes upper, lower, digit, and special character.
-        UPPER=$(LC_ALL=C tr -dc 'A-Z' < /dev/urandom | head -c1)
-        LOWER=$(LC_ALL=C tr -dc 'a-z' < /dev/urandom | head -c1)
-        DIGIT=$(LC_ALL=C tr -dc '0-9' < /dev/urandom | head -c1)
-        SPECIAL=$(LC_ALL=C tr -dc '!@#%^_+=-' < /dev/urandom | head -c1)
-        REST=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c16)
+        # Read a bounded block from /dev/urandom before filtering: piping an
+        # unbounded stream straight into `head -c` makes `tr` die on SIGPIPE
+        # when head closes the pipe, which aborts the step under pipefail.
+        gen() { LC_ALL=C head -c 8192 /dev/urandom | LC_ALL=C tr -dc "$1" | head -c "$2"; }
+        UPPER=$(gen 'A-Z' 1)
+        LOWER=$(gen 'a-z' 1)
+        DIGIT=$(gen '0-9' 1)
+        SPECIAL=$(gen '!@#%^_+=-' 1)
+        REST=$(gen 'A-Za-z0-9' 16)
         PASSWORD="${UPPER}${LOWER}${DIGIT}${SPECIAL}${REST}"
+        if [ "${#PASSWORD}" -lt 14 ]; then
+          echo "::error::Generated password too short (${#PASSWORD} chars); entropy source may be unavailable"
+          exit 1
+        fi
         echo "::add-mask::$PASSWORD"
         echo "password=$PASSWORD" >> "$GITHUB_OUTPUT"
 
@@ -86,6 +94,7 @@ runs:
         CLIENT_IP: "${{ steps.get-ip.outputs.ipv4 }}/32"
         STACK_PASSWORD: ${{ steps.gen-password.outputs.password }}
         CONFIG_FILE: "${{ github.action_path }}/refarch-type-mappings.json"
+        TEMPLATE_FILE: ${{ inputs.compiled_template_file_path }}
       run: |
         KEY_PARAM=$(jq -r ".\"$REFARCH_TYPE\".key_param" $CONFIG_FILE)
         VPC_PARAM=$(jq -r ".\"$REFARCH_TYPE\".vpc_param" $CONFIG_FILE)
@@ -99,12 +108,21 @@ runs:
         jq --arg k "$KEY_PARAM" --arg v "$KEY" '. += [{"ParameterKey": $k, "ParameterValue": $v}]' params.json > tmp.json && mv tmp.json params.json
         jq --arg k "$CLIENT_IP_PARAM" --arg v "$CLIENT_IP" '. += [{"ParameterKey": $k, "ParameterValue": $v}]' params.json > tmp.json && mv tmp.json params.json
 
-        # Inject a random password for any template that asks for one. We
-        # set Password / ConfirmPassword (and never log them) so deployments
-        # do not rely on a hardcoded credential.
-        jq --arg pw "$STACK_PASSWORD" '
-          (.[] | select(.ParameterKey == "Password") | .ParameterValue) |= $pw
-          | (.[] | select(.ParameterKey == "ConfirmPassword") | .ParameterValue) |= $pw
+        # Inject a random password for any template that asks for one. Only
+        # Password / ConfirmPassword parameters that the compiled template
+        # actually declares are set (added if absent, updated if present), so
+        # we never pass an unknown parameter to CloudFormation. The values are
+        # masked and never logged, so deployments do not rely on a hardcoded
+        # credential.
+        jq --arg pw "$STACK_PASSWORD" --slurpfile tmpl "$TEMPLATE_FILE" '
+          ($tmpl[0].Parameters // {}) as $tp
+          | reduce ["Password", "ConfirmPassword"][] as $name (.;
+              if ($tp | has($name)) then
+                if any(.[]; .ParameterKey == $name)
+                then map(if .ParameterKey == $name then .ParameterValue = $pw else . end)
+                else . + [{"ParameterKey": $name, "ParameterValue": $pw}]
+                end
+              else . end)
         ' params.json > tmp.json && mv tmp.json params.json
 
         echo "Generated Parameters (passwords redacted by runner masking):"
