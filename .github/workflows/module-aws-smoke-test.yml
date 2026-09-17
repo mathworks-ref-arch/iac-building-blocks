@@ -84,6 +84,7 @@ jobs:
           vpc_id: ${{ secrets.TEST_VPC_ID }}
           subnet_id: ${{ secrets.TEST_SUBNET_ID }}
           key_pair_name: ${{ vars.EC2_KEY_NAME }}
+          template_staging_bucket: ${{ vars.TEMPLATE_STAGING_BUCKET }}
 
       - name: Run Smoke Tests
         id: smoke-test

@@ -24,6 +24,14 @@ inputs:
   key_pair_name:
     description: "Name of the pre-provisioned AWS EC2 key pair for instance access"
     required: true
+  template_staging_bucket:
+    description: |
+      S3 bucket used to stage the template when it is too large to submit
+      inline. CloudFormation caps --template-body at 51200 bytes, so any
+      template above that has to be passed by URL instead. Only required for
+      those; smaller templates are submitted inline exactly as before.
+    required: false
+    default: ''
 
 outputs:
   stack_outputs:
@@ -130,17 +138,42 @@ runs:
 
     - name: Deploy Stack
       shell: bash
+      env:
+        STAGING_BUCKET: ${{ inputs.template_staging_bucket }}
       run: |
         TEMPLATE_FILE="${{ inputs.compiled_template_file_path }}"
-        
+
         if [[ ! -f "$TEMPLATE_FILE" ]]; then
           echo "::error::Template file not found at $TEMPLATE_FILE"
           exit 1
         fi
 
+        # CloudFormation rejects an inline --template-body over 51200 bytes, so
+        # anything larger has to be staged in S3 and passed by URL. Templates
+        # under the limit keep going inline, which needs no bucket.
+        INLINE_LIMIT=51200
+        TEMPLATE_SIZE=$(wc -c < "$TEMPLATE_FILE")
+        echo "Template size: ${TEMPLATE_SIZE} bytes (inline limit ${INLINE_LIMIT})"
+
+        if [ "$TEMPLATE_SIZE" -le "$INLINE_LIMIT" ]; then
+          TEMPLATE_ARG=(--template-body "file://$TEMPLATE_FILE")
+        else
+          if [ -z "$STAGING_BUCKET" ]; then
+            echo "::error::Template is ${TEMPLATE_SIZE} bytes, over CloudFormation's ${INLINE_LIMIT}-byte inline limit. Set the template_staging_bucket input (for example from a TEMPLATE_STAGING_BUCKET repository variable) so it can be staged in S3 and passed by URL."
+            exit 1
+          fi
+          TEMPLATE_KEY="cfn-staging/${{ inputs.stack_name }}/$(basename "$TEMPLATE_FILE")"
+          echo "Staging template at s3://${STAGING_BUCKET}/${TEMPLATE_KEY}"
+          aws s3 cp "$TEMPLATE_FILE" "s3://${STAGING_BUCKET}/${TEMPLATE_KEY}" \
+            --region ${{ inputs.region }}
+          # Record the key so the cleanup step can remove it afterwards.
+          echo "TEMPLATE_STAGING_KEY=${TEMPLATE_KEY}" >> $GITHUB_ENV
+          TEMPLATE_ARG=(--template-url "https://${STAGING_BUCKET}.s3.${{ inputs.region }}.amazonaws.com/${TEMPLATE_KEY}")
+        fi
+
         aws cloudformation create-stack \
           --stack-name ${{ inputs.stack_name }} \
-          --template-body file://"$TEMPLATE_FILE" \
+          "${TEMPLATE_ARG[@]}" \
           --region ${{ inputs.region }} \
           --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
           --parameters file://params.json
@@ -157,6 +190,18 @@ runs:
             --output table
           exit 1
         fi
+
+    - name: Remove staged template
+      if: always() && env.TEMPLATE_STAGING_KEY != ''
+      shell: bash
+      env:
+        STAGING_BUCKET: ${{ inputs.template_staging_bucket }}
+      run: |
+        # Best effort: the stack no longer needs the staged copy once creation
+        # has been submitted, and leaving it behind would accumulate objects.
+        aws s3 rm "s3://${STAGING_BUCKET}/${TEMPLATE_STAGING_KEY}" \
+          --region ${{ inputs.region }} || \
+          echo "::warning::Could not remove staged template s3://${STAGING_BUCKET}/${TEMPLATE_STAGING_KEY}"
 
     - name: Retrieve Stack Outputs
       id: outputs
