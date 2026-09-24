@@ -48,7 +48,8 @@ Parameters:
   VpcCidrBlock:
     Type: String
     Default: '10.0.0.0/16'
-    Description: 'CIDR block for the VPC. Must be a valid IPv4 CIDR block between /16 and /22.'
+    Description: 'CIDR block for the VPC. Must be a valid IPv4 CIDR block between /16 and /22. MathWorks recommends using an RFC 1918 private address range. For more information, see
+    https://docs.aws.amazon.com/vpc/latest/userguide/vpc-cidr-blocks.html#vpc-sizing-ipv4'
     AllowedPattern: '^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-2]))$'
     ConstraintDescription: 'VPC CIDR block must be a valid IPv4 CIDR block (between /16 and /22)'
 
