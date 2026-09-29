@@ -30,6 +30,11 @@ inputs:
       inline. CloudFormation caps --template-body at 51200 bytes, so any
       template above that has to be passed by URL instead. Only required for
       those; smaller templates are submitted inline exactly as before.
+
+      Use one dedicated bucket in the deploy region, carrying a lifecycle rule
+      that expires the cfn-staging/ prefix. Staged copies are left for that rule
+      to remove rather than being deleted by this action, so a bucket without
+      the rule will accumulate templates.
     required: false
     default: ''
 
@@ -166,8 +171,10 @@ runs:
           echo "Staging template at s3://${STAGING_BUCKET}/${TEMPLATE_KEY}"
           aws s3 cp "$TEMPLATE_FILE" "s3://${STAGING_BUCKET}/${TEMPLATE_KEY}" \
             --region ${{ inputs.region }}
-          # Record the key so the cleanup step can remove it afterwards.
-          echo "TEMPLATE_STAGING_KEY=${TEMPLATE_KEY}" >> $GITHUB_ENV
+          # The staged copy is left in place for the bucket's lifecycle rule on
+          # the cfn-staging/ prefix to expire. Deleting it here would need
+          # s3:DeleteObject on the role and would still leave objects behind
+          # whenever a run is cancelled before the cleanup step.
           TEMPLATE_ARG=(--template-url "https://${STAGING_BUCKET}.s3.${{ inputs.region }}.amazonaws.com/${TEMPLATE_KEY}")
         fi
 
@@ -190,18 +197,6 @@ runs:
             --output table
           exit 1
         fi
-
-    - name: Remove staged template
-      if: always() && env.TEMPLATE_STAGING_KEY != ''
-      shell: bash
-      env:
-        STAGING_BUCKET: ${{ inputs.template_staging_bucket }}
-      run: |
-        # Best effort: the stack no longer needs the staged copy once creation
-        # has been submitted, and leaving it behind would accumulate objects.
-        aws s3 rm "s3://${STAGING_BUCKET}/${TEMPLATE_STAGING_KEY}" \
-          --region ${{ inputs.region }} || \
-          echo "::warning::Could not remove staged template s3://${STAGING_BUCKET}/${TEMPLATE_STAGING_KEY}"
 
     - name: Retrieve Stack Outputs
       id: outputs
