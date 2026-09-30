@@ -26,17 +26,9 @@ inputs:
     required: true
   template_staging_bucket:
     description: |
-      S3 bucket used to stage the template when it is too large to submit
-      inline. CloudFormation caps --template-body at 51200 bytes, so any
-      template above that has to be passed by URL instead. Only required for
-      those; smaller templates are submitted inline exactly as before.
-
-      Use one dedicated bucket in the deploy region, carrying a lifecycle rule
-      that expires the cfn-staging/ prefix. Staged copies are left for that rule
-      to remove rather than being deleted by this action, so a bucket without
-      the rule will accumulate templates.
-    required: false
-    default: ''
+      S3 bucket in the deploy region that the template is staged in. Needs a
+      lifecycle rule expiring the cfn-staging/ prefix, which is what removes them.
+    required: true
 
 outputs:
   stack_outputs:
@@ -153,34 +145,21 @@ runs:
           exit 1
         fi
 
-        # CloudFormation rejects an inline --template-body over 51200 bytes, so
-        # anything larger has to be staged in S3 and passed by URL. Templates
-        # under the limit keep going inline, which needs no bucket.
-        INLINE_LIMIT=51200
-        TEMPLATE_SIZE=$(wc -c < "$TEMPLATE_FILE")
-        echo "Template size: ${TEMPLATE_SIZE} bytes (inline limit ${INLINE_LIMIT})"
-
-        if [ "$TEMPLATE_SIZE" -le "$INLINE_LIMIT" ]; then
-          TEMPLATE_ARG=(--template-body "file://$TEMPLATE_FILE")
-        else
-          if [ -z "$STAGING_BUCKET" ]; then
-            echo "::error::Template is ${TEMPLATE_SIZE} bytes, over CloudFormation's ${INLINE_LIMIT}-byte inline limit. Set the template_staging_bucket input (for example from a TEMPLATE_STAGING_BUCKET repository variable) so it can be staged in S3 and passed by URL."
-            exit 1
-          fi
-          TEMPLATE_KEY="cfn-staging/${{ inputs.stack_name }}/$(basename "$TEMPLATE_FILE")"
-          echo "Staging template at s3://${STAGING_BUCKET}/${TEMPLATE_KEY}"
-          aws s3 cp "$TEMPLATE_FILE" "s3://${STAGING_BUCKET}/${TEMPLATE_KEY}" \
-            --region ${{ inputs.region }}
-          # The staged copy is left in place for the bucket's lifecycle rule on
-          # the cfn-staging/ prefix to expire. Deleting it here would need
-          # s3:DeleteObject on the role and would still leave objects behind
-          # whenever a run is cancelled before the cleanup step.
-          TEMPLATE_ARG=(--template-url "https://${STAGING_BUCKET}.s3.${{ inputs.region }}.amazonaws.com/${TEMPLATE_KEY}")
+        if [ -z "$STAGING_BUCKET" ]; then
+          echo "::error::template_staging_bucket is empty. Set it from a TEMPLATE_STAGING_BUCKET repository variable."
+          exit 1
         fi
+
+        # Always by URL: --template-body caps at 51200 bytes and the templates are
+        # close to it. The key carries the stack name, unique per run and version.
+        TEMPLATE_KEY="cfn-staging/${{ inputs.stack_name }}/$(basename "$TEMPLATE_FILE")"
+        echo "Staging template at s3://${STAGING_BUCKET}/${TEMPLATE_KEY}"
+        aws s3 cp "$TEMPLATE_FILE" "s3://${STAGING_BUCKET}/${TEMPLATE_KEY}" \
+          --region ${{ inputs.region }}
 
         aws cloudformation create-stack \
           --stack-name ${{ inputs.stack_name }} \
-          "${TEMPLATE_ARG[@]}" \
+          --template-url "https://${STAGING_BUCKET}.s3.${{ inputs.region }}.amazonaws.com/${TEMPLATE_KEY}" \
           --region ${{ inputs.region }} \
           --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
           --parameters file://params.json
