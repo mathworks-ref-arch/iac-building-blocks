@@ -24,7 +24,7 @@ This action executes pytest-based end-to-end smoke tests against a live CloudFor
 ```yaml
 - name: Run Smoke Tests
   id: smoke-tests
-  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/run-smoke-tests@main
+  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/run-smoke-tests@experimental
   with:
     region: 'us-east-1'
     stack_name: 'test-stack-12345'

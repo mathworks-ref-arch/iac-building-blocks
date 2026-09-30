@@ -26,7 +26,7 @@ This action acts as the template compiler for our CloudFormation infrastructure.
 
 ```yaml
 - name: Generate CloudFormation Template
-  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/create-aws-template@main
+  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/create-aws-template@experimental
   with:
     region_map: '{"us-east-1": {"AMI": "ami-0123456789abcdef0"}}'
     output_filename: 'R2025a-release-template.json'

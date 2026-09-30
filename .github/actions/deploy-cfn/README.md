@@ -32,7 +32,7 @@ This action deploys an ephemeral CloudFormation stack for integration and smoke 
 ```yaml
 - name: Deploy Ephemeral Stack
   id: deploy
-  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/deploy-cfn@main
+  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/deploy-cfn@experimental
   with:
     compiled_template_file_path: './R2025a-test-template.json'
     refarch_type: 'matlab-linux'
