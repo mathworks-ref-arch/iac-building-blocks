@@ -90,11 +90,19 @@ jobs:
             exit 1
           fi
 
-          RELEASE_TEMPLATE="${GITHUB_WORKSPACE}/releases/${{ inputs.matlab_version }}/aws-matlab-template.json"
-          if [ ! -f "$RELEASE_TEMPLATE" ]; then
-            echo "::error::Release template not found: $RELEASE_TEMPLATE. Ensure releases/${{ inputs.matlab_version }}/aws-matlab-template.json exists."
+          # Each release directory holds exactly one template, named after the
+          # product rather than a fixed name, so find it instead of assuming it.
+          RELEASE_DIR="${GITHUB_WORKSPACE}/releases/${{ inputs.matlab_version }}"
+          mapfile -t FOUND < <(find "$RELEASE_DIR" -maxdepth 1 -name '*.json' -type f 2>/dev/null | sort)
+          if [ "${#FOUND[@]}" -eq 0 ]; then
+            echo "::error::No release template in $RELEASE_DIR. A mock build reads the AMI out of the published template for this release."
             exit 1
           fi
+          if [ "${#FOUND[@]}" -gt 1 ]; then
+            echo "::error::Expected one release template in $RELEASE_DIR, found ${#FOUND[@]}: ${FOUND[*]}"
+            exit 1
+          fi
+          RELEASE_TEMPLATE="${FOUND[0]}"
 
           AMI_ID=$(jq -r --arg region "$REGION" '.Mappings.RegionMap[$region].AMI' "$RELEASE_TEMPLATE")
           if [ -z "$AMI_ID" ] || [ "$AMI_ID" == "null" ]; then
