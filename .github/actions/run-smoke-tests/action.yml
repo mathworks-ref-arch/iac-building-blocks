@@ -16,6 +16,10 @@ inputs:
     description: 'Python version to set up for running the tests'
     required: false
     default: '3.11'
+  mock_build:
+    description: 'True when the AMI predates this run, so build-provenance tests skip'
+    required: false
+    default: 'false'
 
 runs:
   using: "composite"
@@ -48,6 +52,7 @@ runs:
       shell: bash
       env:
         MATLAB_LICENSE_STRING: ${{ inputs.matlab_license_string }}
+        MOCK_BUILD: ${{ inputs.mock_build }}
       run: |
         pytest tests/e2e \
           --stack-name="${{ inputs.stack_name }}" \

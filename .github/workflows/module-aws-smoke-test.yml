@@ -27,6 +27,13 @@ on:
         required: false
         type: string
         default: '{}'
+      mock_build:
+        description: |
+          True when the AMI came from a previous release rather than a build in
+          this run, so tests asserting what this build produced are skipped.
+        required: false
+        type: boolean
+        default: false
 
 env:
   METATEMPLATE_PATH: "./${{ inputs.metatemplate_file_path }}"
@@ -95,6 +102,7 @@ jobs:
           stack_name: ${{ env.STACK_NAME }}
           matlab_license_string: ${{ secrets.MATLAB_LICENSE_STRING }}
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
+          mock_build: ${{ inputs.mock_build }}
 
       - name: Cleanup
         if: always()
