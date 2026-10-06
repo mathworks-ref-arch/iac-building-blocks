@@ -39,7 +39,8 @@ env:
   METATEMPLATE_PATH: "./${{ inputs.metatemplate_file_path }}"
   TEMPLATE_FILENAME: "${{ inputs.matlab_version }}-test-template.json"
   TEST_ARTIFACT_NAME: "${{ inputs.matlab_version }}-test-template"
-  STACK_NAME: "msa-gen-smoke-test-${{ inputs.refarch_type }}-${{ inputs.matlab_version }}-${{ github.run_id }}"
+  # run_attempt keeps a re-run from reusing a stack an earlier attempt left behind.
+  STACK_NAME: "msa-gen-smoke-test-${{ inputs.refarch_type }}-${{ inputs.matlab_version }}-${{ github.run_id }}-${{ github.run_attempt }}"
   TEST_REGION_MAP: '{"${{ inputs.region }}": {"AMI": "${{ inputs.ami_id }}"}}'
 
 jobs:
