@@ -29,6 +29,14 @@ inputs:
       S3 bucket in the deploy region that the template is staged in. Needs a
       lifecycle rule expiring the cfn-staging/ prefix, which is what removes them.
     required: true
+  license_manager:
+    description: "Network license manager as <port>@<host>, set as LicenseManager when the template declares it"
+    required: false
+    default: ""
+  additional_security_group:
+    description: "Extra security group for the instances, set as AdditionalSecurityGroup when the template declares it"
+    required: false
+    default: ""
 
 outputs:
   stack_outputs:
@@ -98,6 +106,8 @@ runs:
         KEY: ${{ inputs.key_pair_name }}
         CLIENT_IP: "${{ steps.get-ip.outputs.ipv4 }}/32"
         STACK_PASSWORD: ${{ steps.gen-password.outputs.password }}
+        LICENSE_MANAGER: ${{ inputs.license_manager }}
+        ADDITIONAL_SG: ${{ inputs.additional_security_group }}
         CONFIG_FILE: "${{ github.action_path }}/refarch-type-mappings.json"
         TEMPLATE_FILE: ${{ inputs.compiled_template_file_path }}
       run: |
@@ -127,6 +137,15 @@ runs:
                 then map(if .ParameterKey == $name then .ParameterValue = $pw else . end)
                 else . + [{"ParameterKey": $name, "ParameterValue": $pw}]
                 end
+              else . end)
+        ' params.json > tmp.json && mv tmp.json params.json
+
+        # License manager settings, only when configured and declared by the template.
+        jq --arg lm "$LICENSE_MANAGER" --arg sg "$ADDITIONAL_SG" --slurpfile tmpl "$TEMPLATE_FILE" '
+          ($tmpl[0].Parameters // {}) as $tp
+          | reduce (["LicenseManager", $lm], ["AdditionalSecurityGroup", $sg]) as [$name, $val] (.;
+              if $val != "" and ($tp | has($name))
+              then . + [{"ParameterKey": $name, "ParameterValue": $val}]
               else . end)
         ' params.json > tmp.json && mv tmp.json params.json
 

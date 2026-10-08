@@ -93,6 +93,8 @@ jobs:
           subnet_id: ${{ secrets.TEST_SUBNET_ID }}
           key_pair_name: ${{ vars.EC2_KEY_NAME }}
           template_staging_bucket: ${{ vars.TEMPLATE_STAGING_BUCKET }}
+          license_manager: ${{ secrets.LICENSE_MANAGER }}
+          additional_security_group: ${{ secrets.LICENSE_MANAGER_SECURITY_GROUP }}
 
       - name: Run Smoke Tests
         id: smoke-test

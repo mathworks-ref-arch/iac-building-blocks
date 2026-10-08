@@ -22,6 +22,8 @@ This action deploys an ephemeral CloudFormation stack for integration and smoke 
 | `stack_name` | Yes | Unique identifier for the temporary stack. |
 | `vpc_id` / `subnet_id` | Yes | Network configuration for the deployment. |
 | `key_pair_name` | Yes | Name of the pre-provisioned AWS EC2 key pair for access. |
+| `license_manager` | No | Network license manager as `<port>@<host>`. Set as `LicenseManager` when the template declares it. |
+| `additional_security_group` | No | Security group added to the instances, typically the license manager's. Set as `AdditionalSecurityGroup` when the template declares it. |
 
 **Outputs:**
 
