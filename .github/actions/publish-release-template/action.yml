@@ -1,0 +1,66 @@
+# Copyright 2026 The MathWorks, Inc.
+name: 'Publish Release Template'
+description: 'Writes a release template to a fixed S3 key, replacing the current object unless a newer run of the repository wrote it.'
+inputs:
+  template_file:
+    description: 'Path to the compiled release template'
+    required: true
+  bucket:
+    description: 'S3 bucket to publish to'
+    required: true
+  key:
+    description: 'Object key, e.g. R2026b/aws-matlab-template.json'
+    required: true
+  acl:
+    description: 'Canned ACL for the object (e.g. public-read, private). Empty sets none'
+    required: false
+    default: 'public-read'
+  region:
+    description: 'Region of the bucket'
+    required: false
+    default: 'us-east-1'
+  python_version:
+    description: 'Python version to set up for running the publish script'
+    required: false
+    default: '3.11'
+
+outputs:
+  template_url:
+    description: 'URL of the published template, https://<bucket>.s3.amazonaws.com/<key>'
+    value: ${{ steps.publish.outputs.template_url }}
+  version_id:
+    description: 'Version id of the written object, empty if the bucket is not versioned'
+    value: ${{ steps.publish.outputs.version_id }}
+  result:
+    description: 'created if the key was new, replaced if an existing object was overwritten'
+    value: ${{ steps.publish.outputs.result }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install Dependencies
+      shell: bash
+      run: |
+        pip install boto3
+
+    - name: Run Publish Script
+      id: publish
+      shell: bash
+      env:
+        INPUT_FILE: ${{ inputs.template_file }}
+        INPUT_BUCKET: ${{ inputs.bucket }}
+        INPUT_KEY: ${{ inputs.key }}
+        INPUT_ACL: ${{ inputs.acl }}
+        INPUT_REGION: ${{ inputs.region }}
+      run: |
+        python ${{ github.action_path }}/publish_template.py \
+          --template-file "$INPUT_FILE" \
+          --bucket "$INPUT_BUCKET" \
+          --key "$INPUT_KEY" \
+          --acl "$INPUT_ACL" \
+          --region "$INPUT_REGION"
