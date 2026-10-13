@@ -38,7 +38,7 @@ The credentials in the job (for example from `aws-actions/configure-aws-credenti
 ```yaml
 - name: Publish Release Template
   id: publish_template
-  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-release-template@main
+  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-release-template@experimental
   with:
     template_file: 'R2026b-release-template.json'
     bucket: 'my-release-bucket'

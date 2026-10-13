@@ -176,7 +176,7 @@ jobs:
 
       - name: Publish Release Template
         id: publish_template
-        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-release-template@main
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-release-template@experimental
         with:
           template_file: ${{ env.TEMPLATE_FILENAME }}
           bucket: ${{ vars.RELEASE_BUCKET }}
@@ -203,7 +203,7 @@ jobs:
 
       - name: Remove Test Copies
         if: success() && env.DRY_RUN == 'true'
-        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami/cleanup@main
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami/cleanup@experimental
         with:
           regions: ${{ inputs.target_regions }}
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
