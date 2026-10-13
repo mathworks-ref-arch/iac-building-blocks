@@ -1,6 +1,6 @@
 # Copyright 2026 The MathWorks, Inc.
 name: 'Publish AMI'
-description: 'Copies a source AMI to multiple regions, makes the copies public, and outputs a CloudFormation RegionMap.'
+description: 'Copies a source AMI to multiple regions, optionally makes the copies public, and outputs a CloudFormation RegionMap.'
 inputs:
   ami_id:
     description: 'The Source AMI ID'
@@ -21,6 +21,14 @@ inputs:
     description: 'If true, skips AWS calls and returns mock data'
     required: false
     default: true
+  make_public:
+    description: 'If true, makes the AMIs in the RegionMap and their snapshots public. If false, the copies are tagged as test copies'
+    required: false
+    default: 'false'
+  timeout_minutes:
+    description: 'How long to wait in total for the copies to become available'
+    required: false
+    default: '45'
   python_version:
     description: 'Python version to set up for running the publish script'
     required: false
@@ -28,8 +36,11 @@ inputs:
 
 outputs:
   region_map_json:
-    description: "JSON string formatted as { RegionMap: { region: { AMI: id } } }"
+    description: "RegionMap object as a JSON string: { region: { AMI: id } }, with a placeholder for regions without a published AMI"
     value: ${{ steps.publish.outputs.region_map_json }}
+  copies_json:
+    description: "JSON list of { region, ami_id, snapshot_ids, state } for the target regions; state is created, reused or source"
+    value: ${{ steps.publish.outputs.copies_json }}
 
 runs:
   using: "composite"
@@ -54,11 +65,17 @@ runs:
         INPUT_VER: ${{ inputs.matlab_version }}
         INPUT_REFARCH_TYPE: ${{ inputs.refarch_type }}
         INPUT_TEST: ${{ inputs.test_mode }}
+        INPUT_PUBLIC: ${{ inputs.make_public }}
+        INPUT_TIMEOUT: ${{ inputs.timeout_minutes }}
       run: |
-        # Construct flag for test mode
+        # Construct flags for test mode and public copies
         TEST_FLAG=""
         if [ "$INPUT_TEST" == "true" ]; then
           TEST_FLAG="--test-mode"
+        fi
+        PUBLIC_FLAG=""
+        if [ "$INPUT_PUBLIC" == "true" ]; then
+          PUBLIC_FLAG="--make-public"
         fi
 
         python ${{ github.action_path }}/publish.py \
@@ -67,4 +84,5 @@ runs:
           --dest-regions "$INPUT_DEST" \
           --version "$INPUT_VER" \
           --refarch-type "$INPUT_REFARCH_TYPE" \
-          $TEST_FLAG
+          --timeout-minutes "$INPUT_TIMEOUT" \
+          $TEST_FLAG $PUBLIC_FLAG
