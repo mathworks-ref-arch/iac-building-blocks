@@ -117,6 +117,17 @@ class TestCopy(PublishTestCase):
         self.assertEqual(region_map['us-east-1'], {'AMI': 'ami-0east'})
         self.assertEqual([c['state'] for c in copies], ['created', 'created'])
 
+    def test_new_copy_not_visible_yet_counts_as_pending(self):
+        self.expect_source(owner=OTHER)
+        self.expect_existing('eu-west-1', [])
+        self.expect_copy('eu-west-1', 'ami-0new')
+        self.aws.stub('ec2', 'eu-west-1').add_client_error(
+            'describe_images', service_error_code='InvalidAMIID.NotFound',
+            expected_params={'ImageIds': ['ami-0new']})
+        self.expect_state('eu-west-1', 'ami-0new', 'available')
+        region_map, _ = publish.publish(SRC_AMI, SRC_REGION, ['eu-west-1'], 'R2026b', 'matlab-linux')
+        self.assertEqual(region_map['eu-west-1'], {'AMI': 'ami-0new'})
+
     def test_tags_on_image_and_snapshot(self):
         common = [
             {'Key': 'mw-release-pipeline', 'Value': 'public-builds'},

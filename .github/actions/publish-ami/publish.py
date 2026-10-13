@@ -148,6 +148,17 @@ def start_copy(ec2, src_ami, src_region, version, refarch_type, tags):
     return response['ImageId']
 
 
+def copy_state(ec2, ami):
+    """Return (state, image) for a copy. A copy EC2 doesn't show yet counts as pending."""
+    try:
+        image = describe_image(ec2, ami)
+    except ClientError as e:
+        if e.response.get('Error', {}).get('Code') != 'InvalidAMIID.NotFound':
+            raise
+        image = None
+    return (image['State'], image) if image else ('pending', None)
+
+
 def wait_for_copies(ec2_for, pending, deadline):
     """Poll all pending copies together until they are available.
 
@@ -158,8 +169,7 @@ def wait_for_copies(ec2_for, pending, deadline):
     done = {}
     while True:
         for region, ami in list(pending.items()):
-            image = describe_image(ec2_for(region), ami)
-            state = image['State'] if image else 'missing'
+            state, image = copy_state(ec2_for(region), ami)
             if state == 'available':
                 done[region] = image
                 del pending[region]
