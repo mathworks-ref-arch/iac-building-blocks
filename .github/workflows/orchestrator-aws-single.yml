@@ -96,7 +96,8 @@ jobs:
     secrets: inherit
 
   release:
-    if: ${{ inputs.is_supplementary_build == false }}
+    # Not skipped silently when the smoke test is skipped: the release module fails on it instead.
+    if: ${{ !cancelled() && inputs.is_supplementary_build == false && needs.build.result == 'success' }}
     needs: [build, smoke-test]
     uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-aws-release.yml@experimental
     with:
@@ -107,4 +108,6 @@ jobs:
       target_regions: ${{ vars.TARGET_REGIONS }}
       metatemplate_file_path: ${{ inputs.metatemplate_file_path }}
       lambda_injections: ${{ inputs.lambda_injections }}
+      mock_build: ${{ inputs.skip_build }}
+      smoke_test_result: ${{ needs.smoke-test.result }}
     secrets: inherit

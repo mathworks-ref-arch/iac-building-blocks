@@ -1,5 +1,5 @@
 # Copyright 2026 The MathWorks, Inc.
-name: 'Module: AWS Release Prep'
+name: 'Module: AWS Release'
 
 on:
   workflow_call:
@@ -29,28 +29,122 @@ on:
         required: false
         type: string
         default: '{}'
+      mock_build:
+        description: |
+          True when the build reused a published AMI instead of building
+          one. A mock build is never released.
+        required: false
+        type: boolean
+        default: false
+      smoke_test_result:
+        description: |
+          Result of the smoke test job. Only a build whose smoke test
+          succeeded is released.
+        required: true
+        type: string
+
 env:
   METATEMPLATE_PATH: "./${{ inputs.metatemplate_file_path }}"
   TEMPLATE_FILENAME: "${{ inputs.matlab_version }}-release-template.json"
   RELEASE_ARTIFACT_NAME: "${{ inputs.matlab_version }}-release-template"
+  # Unless RELEASE_DRY_RUN is 'false', nothing is made public and the template is written privately.
+  DRY_RUN: ${{ vars.RELEASE_DRY_RUN != 'false' }}
 
 jobs:
-  prep-release:
+  check:
+    name: "${{ inputs.matlab_version }}: Check release conditions"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Release Conditions
+        env:
+          SMOKE_TEST_RESULT: ${{ inputs.smoke_test_result }}
+          MOCK_BUILD: ${{ inputs.mock_build }}
+          AMI_ID: ${{ inputs.ami_id }}
+          SOURCE_REGION: ${{ inputs.source_region }}
+          TARGET_REGIONS: ${{ inputs.target_regions }}
+          RELEASE_BUCKET: ${{ vars.RELEASE_BUCKET }}
+          RELEASE_ROLE: ${{ secrets.AWS_RELEASE_ROLE }}
+        run: |
+          FAILED=0
+          if [ "$SMOKE_TEST_RESULT" != "success" ]; then
+            echo "::error::The smoke test result is '$SMOKE_TEST_RESULT'. Only a build whose smoke test passed is released."
+            FAILED=1
+          fi
+          if [ "$MOCK_BUILD" == "true" ]; then
+            echo "::error::This run reused a published AMI (SKIP_BUILD). A mock build is never released."
+            FAILED=1
+          fi
+          if [ -z "$AMI_ID" ] || [ -z "$SOURCE_REGION" ]; then
+            echo "::error::The build step produced no AMI or region."
+            FAILED=1
+          fi
+          if [ -z "$TARGET_REGIONS" ]; then
+            echo "::error::TARGET_REGIONS is empty. Set vars.TARGET_REGIONS on the calling repository."
+            FAILED=1
+          fi
+          if [ -z "$RELEASE_BUCKET" ]; then
+            echo "::error::RELEASE_BUCKET is empty. Set vars.RELEASE_BUCKET on the calling repository."
+            FAILED=1
+          fi
+          if [ -z "$RELEASE_ROLE" ]; then
+            echo "::error::The AWS_RELEASE_ROLE secret is not set on the calling repository."
+            FAILED=1
+          fi
+          exit $FAILED
+
+  share:
+    name: "${{ inputs.matlab_version }}: Share AMI with the release account"
+    needs: check
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
     steps:
-      - name: Validate Inputs
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ inputs.source_region }}
+
+      # Copying a shared AMI needs launch permission on the AMI and volume permission on its snapshots.
+      - name: Share AMI
+        env:
+          AMI_ID: ${{ inputs.ami_id }}
+          RELEASE_ROLE: ${{ secrets.AWS_RELEASE_ROLE }}
         run: |
-          if [ -z "${{ inputs.target_regions }}" ]; then
-            echo "::error::target_regions is empty. Set vars.TARGET_REGIONS on the calling repository."
-            exit 1
+          RELEASE_ACCOUNT=$(echo "$RELEASE_ROLE" | cut -d: -f5)
+          BUILD_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          if [ "$RELEASE_ACCOUNT" == "$BUILD_ACCOUNT" ]; then
+            echo "The release role is in the build account. Nothing to share."
+            exit 0
           fi
-          if [ -z "${{ inputs.source_region }}" ]; then
-            echo "::error::source_region is empty. The build step may have failed to produce a region output."
-            exit 1
-          fi
+          aws ec2 modify-image-attribute --image-id "$AMI_ID" --launch-permission "Add=[{UserId=$RELEASE_ACCOUNT}]"
+          for SNAPSHOT_ID in $(aws ec2 describe-images --image-ids "$AMI_ID" --query 'Images[0].BlockDeviceMappings[].Ebs.SnapshotId' --output text); do
+            aws ec2 modify-snapshot-attribute --snapshot-id "$SNAPSHOT_ID" --attribute createVolumePermission --operation-type add --user-ids "$RELEASE_ACCOUNT"
+          done
+          echo "Shared $AMI_ID and its snapshots with the release account."
+
+  release:
+    name: "${{ inputs.matlab_version }}: Publish release"
+    needs: share
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: release
+    concurrency:
+      group: release-${{ github.repository }}-${{ inputs.matlab_version }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_RELEASE_ROLE }}
+          aws-region: ${{ inputs.source_region }}
+          role-duration-seconds: ${{ vars.AWS_RELEASE_ROLE_DURATION_SECONDS || 3600 }}
 
       - name: Publish AMI
         id: publish_ami
@@ -61,10 +155,9 @@ jobs:
           target_ami_regions: ${{ inputs.target_regions }}
           matlab_version: ${{ inputs.matlab_version }}
           refarch_type: ${{ inputs.refarch_type }}
-          test_mode: true
+          test_mode: false
+          make_public: ${{ env.DRY_RUN == 'false' }}
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
-
-      - uses: actions/checkout@v5
 
       - name: Generate Release Template
         uses: mathworks-ref-arch/iac-building-blocks/.github/actions/create-aws-template@experimental
@@ -75,4 +168,42 @@ jobs:
           metatemplate_file_path: ${{ env.METATEMPLATE_PATH }}
           lambda_injections: ${{ inputs.lambda_injections }}
 
-      # Future: Push template to production S3 bucket
+      # The published name is the meta-template's file name, under the MATLAB version.
+      - name: Set Template Key
+        id: template_key
+        run: |
+          echo "key=${{ inputs.matlab_version }}/$(basename "$METATEMPLATE_PATH")" >> $GITHUB_OUTPUT
+
+      - name: Publish Release Template
+        id: publish_template
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-release-template@main
+        with:
+          template_file: ${{ env.TEMPLATE_FILENAME }}
+          bucket: ${{ vars.RELEASE_BUCKET }}
+          key: ${{ steps.template_key.outputs.key }}
+          acl: ${{ env.DRY_RUN == 'true' && 'private' || 'public-read' }}
+          python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
+
+      - name: Summary
+        env:
+          COPIES_JSON: ${{ steps.publish_ami.outputs.copies_json }}
+          TEMPLATE_URL: ${{ steps.publish_template.outputs.template_url }}
+          TEMPLATE_RESULT: ${{ steps.publish_template.outputs.result }}
+          MATLAB_VERSION: ${{ inputs.matlab_version }}
+        run: |
+          python3 - >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+          import json, os
+          dry_run = " (dry run: nothing made public)" if os.environ["DRY_RUN"] == "true" else ""
+          print(f"### {os.environ['MATLAB_VERSION']} release{dry_run}\n")
+          print(f"Template ({os.environ['TEMPLATE_RESULT']}): {os.environ['TEMPLATE_URL']}\n")
+          print("| Region | AMI | State |\n| :--- | :--- | :--- |")
+          for copy in json.loads(os.environ["COPIES_JSON"]):
+              print(f"| {copy['region']} | {copy['ami_id']} | {copy['state']} |")
+          EOF
+
+      - name: Remove Test Copies
+        if: success() && env.DRY_RUN == 'true'
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami/cleanup@main
+        with:
+          regions: ${{ inputs.target_regions }}
+          python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
