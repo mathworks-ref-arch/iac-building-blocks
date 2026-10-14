@@ -18,6 +18,8 @@ This action executes pytest-based end-to-end smoke tests against a live CloudFor
 | `region` | Yes | AWS region where the stack is deployed. |
 | `stack_name` | Yes | Name of the deployed CloudFormation stack to test against. |
 | `matlab_license_string` | Yes | MATLAB license string for product activation during tests. |
+| `mock_build` | No | `true` when the AMI came from a previous release rather than from the build in the calling workflow run. Passed to the tests as `MOCK_BUILD`. Default `false`. |
+| `ami_id` | No | AMI the stack was deployed with. Passed to the tests as `EXPECTED_AMI_ID`, so they can check the instances run it. |
 
 ### Example Usage
 
