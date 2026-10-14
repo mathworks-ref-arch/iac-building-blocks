@@ -57,6 +57,9 @@ jobs:
       - name: Run Packer Build
         if: inputs.skip_build == false
         working-directory: ${{ inputs.packer_dir }}
+        env:
+          # Existing instance profile for the build instance; empty keeps the template's default.
+          PKR_VAR_AWS_INSTANCE_PROFILE: ${{ vars.PACKER_INSTANCE_PROFILE }}
         run: |
           packer init .
           packer build -color=false \
