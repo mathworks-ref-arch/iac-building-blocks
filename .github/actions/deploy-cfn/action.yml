@@ -24,6 +24,11 @@ inputs:
   key_pair_name:
     description: "Name of the pre-provisioned AWS EC2 key pair for instance access"
     required: true
+  template_staging_bucket:
+    description: |
+      S3 bucket in the deploy region that the template is staged in. Needs a
+      lifecycle rule expiring the cfn-staging/ prefix, which is what removes them.
+    required: true
 
 outputs:
   stack_outputs:
@@ -130,17 +135,31 @@ runs:
 
     - name: Deploy Stack
       shell: bash
+      env:
+        STAGING_BUCKET: ${{ inputs.template_staging_bucket }}
       run: |
         TEMPLATE_FILE="${{ inputs.compiled_template_file_path }}"
-        
+
         if [[ ! -f "$TEMPLATE_FILE" ]]; then
           echo "::error::Template file not found at $TEMPLATE_FILE"
           exit 1
         fi
 
+        if [ -z "$STAGING_BUCKET" ]; then
+          echo "::error::template_staging_bucket is empty. Set it from a TEMPLATE_STAGING_BUCKET repository variable."
+          exit 1
+        fi
+
+        # Always by URL: --template-body caps at 51200 bytes and the templates are
+        # close to it. The key carries the stack name, unique per run and version.
+        TEMPLATE_KEY="cfn-staging/${{ inputs.stack_name }}/$(basename "$TEMPLATE_FILE")"
+        echo "Staging template at s3://${STAGING_BUCKET}/${TEMPLATE_KEY}"
+        aws s3 cp "$TEMPLATE_FILE" "s3://${STAGING_BUCKET}/${TEMPLATE_KEY}" \
+          --region ${{ inputs.region }}
+
         aws cloudformation create-stack \
           --stack-name ${{ inputs.stack_name }} \
-          --template-body file://"$TEMPLATE_FILE" \
+          --template-url "https://${STAGING_BUCKET}.s3.${{ inputs.region }}.amazonaws.com/${TEMPLATE_KEY}" \
           --region ${{ inputs.region }} \
           --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
           --parameters file://params.json

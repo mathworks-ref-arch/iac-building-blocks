@@ -20,6 +20,9 @@ inputs:
   dual_repo_url:
     description: 'URL to the sister repository (same offering, different OS)'
     required: true
+  template_file_name:
+    description: 'File name each release template is written under in the repository'
+    default: 'aws-matlab-template.json'
   python_version:
     description: 'Python version to set up for running the processing scripts'
     required: false
@@ -45,6 +48,7 @@ runs:
         ARTIFACT_PATH: ${{ inputs.artifact_path }}
         S3_BUCKET_URL: ${{ inputs.s3_bucket_url }}
         DUAL_REPO_URL: ${{ inputs.dual_repo_url }}
+        TEMPLATE_FILE_NAME: ${{ inputs.template_file_name }}
       run: |
         # We execute the script located in THIS action's directory
         python ${{ github.action_path }}/processor.py \
@@ -52,5 +56,6 @@ runs:
           --source-path "$SOURCE_PATH" \
           --artifact-path "$ARTIFACT_PATH" \
           --s3-bucket-url "$S3_BUCKET_URL" \
-          --dual-repo-url "$DUAL_REPO_URL"
+          --dual-repo-url "$DUAL_REPO_URL" \
+          --template-file-name "$TEMPLATE_FILE_NAME"
 

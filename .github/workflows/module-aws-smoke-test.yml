@@ -27,12 +27,20 @@ on:
         required: false
         type: string
         default: '{}'
+      mock_build:
+        description: |
+          True when the AMI came from a previous release rather than from the
+          build in the calling workflow run, so tests asserting what that build
+          produced are skipped.
+        type: boolean
+        default: false
 
 env:
   METATEMPLATE_PATH: "./${{ inputs.metatemplate_file_path }}"
   TEMPLATE_FILENAME: "${{ inputs.matlab_version }}-test-template.json"
   TEST_ARTIFACT_NAME: "${{ inputs.matlab_version }}-test-template"
-  STACK_NAME: "msa-gen-smoke-test-${{ inputs.refarch_type }}-${{ inputs.matlab_version }}-${{ github.run_id }}"
+  # run_attempt keeps a re-run from reusing a stack an earlier attempt left behind.
+  STACK_NAME: "msa-gen-smoke-test-${{ inputs.refarch_type }}-${{ inputs.matlab_version }}-${{ github.run_id }}-${{ github.run_attempt }}"
   TEST_REGION_MAP: '{"${{ inputs.region }}": {"AMI": "${{ inputs.ami_id }}"}}'
 
 jobs:
@@ -84,6 +92,7 @@ jobs:
           vpc_id: ${{ secrets.TEST_VPC_ID }}
           subnet_id: ${{ secrets.TEST_SUBNET_ID }}
           key_pair_name: ${{ vars.EC2_KEY_NAME }}
+          template_staging_bucket: ${{ vars.TEMPLATE_STAGING_BUCKET }}
 
       - name: Run Smoke Tests
         id: smoke-test
@@ -94,6 +103,8 @@ jobs:
           stack_name: ${{ env.STACK_NAME }}
           matlab_license_string: ${{ secrets.MATLAB_LICENSE_STRING }}
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
+          mock_build: ${{ inputs.mock_build }}
+          ami_id: ${{ inputs.ami_id }}
 
       - name: Cleanup
         if: always()

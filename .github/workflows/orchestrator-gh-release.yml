@@ -40,6 +40,13 @@ on:
           Example: "*-release-template.json"
         type: string
         default: "*-release-template.json"
+      release_template_file_name:
+        description: |
+          File name each release template is committed under, in
+          releases/<version>/ of the repository.
+          Example: "mjs-cluster-template.json"
+        type: string
+        default: aws-matlab-template.json
       release_files_pattern:
         description: |
           Glob pattern for files to include in the GitHub Release zip
@@ -89,6 +96,7 @@ jobs:
       dual_repo_url: ${{ inputs.dual_repo_url }}
       artifacts_path: ${{ inputs.artifacts_path }}
       release_template_name_pattern: ${{ inputs.release_template_name_pattern }}
+      release_template_file_name: ${{ inputs.release_template_file_name }}
     secrets: inherit
 
   publish-release-artifacts:

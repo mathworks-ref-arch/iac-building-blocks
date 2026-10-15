@@ -92,6 +92,7 @@ jobs:
       region: ${{ needs.build.outputs.region }}
       metatemplate_file_path: ${{ inputs.metatemplate_file_path }}
       lambda_injections: ${{ inputs.lambda_injections }}
+      mock_build: ${{ inputs.skip_build }}
     secrets: inherit
 
   release:

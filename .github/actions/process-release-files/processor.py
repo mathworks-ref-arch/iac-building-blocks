@@ -22,6 +22,7 @@ def setup_args():
     parser.add_argument('--s3-bucket-url',      required=True,  help='S3 Bucket URL')
     parser.add_argument('--dual-repo-url',      required=True,  help='Dual Repo URL')
     parser.add_argument('--output-path',        required=False, help='Destination path for generated files', default='.')
+    parser.add_argument('--template-file-name', required=False, help='File name of each release template', default='aws-matlab-template.json')
 
     return parser.parse_args()
 
@@ -85,12 +86,9 @@ def main():
 
     for r in release_data:
         ver = r['version']
-        # Note: The logic in release.py reads the raw content of the artifact
-        # We need to decide what the output filename should be. 
-        # Based on existing logic it seems it wants to output 'aws-matlab-template.json'
         repository_structure['releases'][ver] = {
             "README.md": r['readme_content'],
-            "aws-matlab-template.json": r['cf_template_content']
+            args.template_file_name: r['cf_template_content']
         }
 
     utils.write_to_disk(OUTPUT_DIR, repository_structure)    

@@ -25,6 +25,7 @@ This action handles the final documentation assembly prior to a GitHub Release. 
 | `artifact_path` | No | Path to the directory containing downloaded CFN artifacts. |
 | `s3_bucket_url` | Yes | Base URL of the production S3 bucket hosting the templates. |
 | `dual_repo_url` | Yes | URL pointer to the sister repository (for cross-OS referencing). |
+| `template_file_name` | No | File name each release template is written under. Defaults to `aws-matlab-template.json`. |
 
 ### Example Usage
 

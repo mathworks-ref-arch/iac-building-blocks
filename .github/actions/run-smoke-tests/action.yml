@@ -16,6 +16,17 @@ inputs:
     description: 'Python version to set up for running the tests'
     required: false
     default: '3.11'
+  mock_build:
+    description: |
+      True when the AMI came from a previous release rather than from the
+      build in the calling workflow run, so tests asserting what that build
+      produced are skipped.
+    required: false
+    default: 'false'
+  ami_id:
+    description: 'AMI the stack was deployed with, passed to the tests as EXPECTED_AMI_ID'
+    required: false
+    default: ''
 
 runs:
   using: "composite"
@@ -48,6 +59,8 @@ runs:
       shell: bash
       env:
         MATLAB_LICENSE_STRING: ${{ inputs.matlab_license_string }}
+        MOCK_BUILD: ${{ inputs.mock_build }}
+        EXPECTED_AMI_ID: ${{ inputs.ami_id }}
       run: |
         pytest tests/e2e \
           --stack-name="${{ inputs.stack_name }}" \

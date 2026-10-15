@@ -19,6 +19,9 @@ on:
       release_template_name_pattern:
         required: true
         type: string
+      release_template_file_name:
+        type: string
+        default: aws-matlab-template.json
 
 jobs:
   commit-files:
@@ -51,6 +54,7 @@ jobs:
           artifact_path: '${{ inputs.artifacts_path }}'
           s3_bucket_url: ${{ inputs.s3_bucket_url }}
           dual_repo_url: ${{ inputs.dual_repo_url }}
+          template_file_name: ${{ inputs.release_template_file_name }}
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
 
       - name: Commit and Push
