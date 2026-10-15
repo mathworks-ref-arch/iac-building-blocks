@@ -30,7 +30,7 @@ jobs:
   build:
     name: "${{ inputs.matlab_version }}: Packer Build"
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: ${{ fromJSON(vars.PACKER_TIMEOUT_MINUTES || '120') }}
     permissions:
       id-token: write
       contents: read
