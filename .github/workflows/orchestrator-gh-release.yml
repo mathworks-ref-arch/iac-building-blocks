@@ -49,18 +49,26 @@ on:
         type: string
       release_tag:
         description: |
-          Git tag name for the GitHub Release. Must be unique across
-          releases. Defaults to "Build-<run_number>" for automatic
-          sequential naming.
-          Example: "Build-42", "v2025a-release"
-        default: "Build-${{ github.run_number }}"
+          Git tag name for the GitHub Release. Leave empty to use the
+          month the run started, with .2, .3 for later runs that month.
+          A re-run keeps its tag.
+          Example: "2026-10", "2026-10.2"
+        default: ""
         type: string
       release_title:
         description: |
-          Display title for the GitHub Release page. Shown in the
-          releases UI and notification emails.
-          Example: "MATLAB on AWS Windows - Build 42"
-        required: true
+          Display title for the GitHub Release page. Leave empty for
+          "<release_name> release <month> <year>: <versions>", or "build"
+          instead of "release" for supplementary builds.
+          Example: "MATLAB on AWS release October 2026: R2026b, R2026a"
+        default: ""
+        type: string
+      release_name:
+        description: |
+          Product name the generated release title starts with.
+          Defaults to the repository name.
+          Example: "MATLAB on AWS Windows"
+        default: ""
         type: string
       generate_attestations:
         description: |
@@ -100,6 +108,8 @@ jobs:
       release_files_pattern: ${{ inputs.release_files_pattern }}
       release_tag: ${{ inputs.release_tag }}
       release_title: ${{ inputs.release_title }}
+      release_name: ${{ inputs.release_name }}
+      is_supplementary_build: ${{ inputs.is_supplementary_build }}
       prerelease: false
       generate_attestations: ${{ inputs.generate_attestations }}
     secrets: inherit

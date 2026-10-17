@@ -8,11 +8,25 @@ on:
         required: true
         type: string
       release_tag:
-        required: true
+        description: "Tag for the release. Empty: the run's month (YYYY-MM), then .2, .3 for later runs that month"
+        required: false
         type: string
+        default: ''
       release_title:
-        required: true
+        description: "Title for the release. Empty: '<release_name> release|build <month> <year>: <versions>'"
+        required: false
         type: string
+        default: ''
+      release_name:
+        description: "Product name the generated title starts with. Defaults to the repository name"
+        required: false
+        type: string
+        default: ''
+      is_supplementary_build:
+        description: "When true, the title says build instead of release and the release isn't marked latest"
+        required: false
+        type: boolean
+        default: false
       prerelease:
         required: true
         type: boolean
@@ -28,6 +42,11 @@ jobs:
       contents: write       # Required to create the release
       id-token: write       # Required for attestation signing
       attestations: write   # Required to store attestations
+      actions: read         # Required to read when the run started
+    # One release at a time per repository, so two runs can't take the same tag.
+    concurrency:
+      group: gh-release-${{ github.repository }}
+      cancel-in-progress: false
 
     steps:
       - name: Checkout
@@ -62,9 +81,40 @@ jobs:
             echo "Zipping artifacts for $VER..."
             zip -j "release_assets/${VER}-artifacts.zip" ./artifacts/${VER}*
           done
+          echo "versions=$(echo "$VERSIONS" | sort -r | paste -sd, - | sed 's/,/, /g')" >> "$GITHUB_OUTPUT"
 
           echo "Prepared Zips:"
           ls -l release_assets/
+
+      - name: Name Release
+        id: name
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.release_tag }}
+          INPUT_TITLE: ${{ inputs.release_title }}
+          INPUT_NAME: ${{ inputs.release_name }}
+          KIND: ${{ inputs.is_supplementary_build && 'build' || 'release' }}
+          VERSIONS: ${{ steps.files.outputs.versions }}
+        run: |
+          # The month the run started, which a re-run keeps.
+          MONTH=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" --jq '.created_at[0:7]')
+          MONTH_NAME=$(date -u -d "${MONTH}-01" '+%B %Y')
+          TAG="$INPUT_TAG"
+          if [ -z "$TAG" ]; then
+            # A re-run finds its own release by the run link in the body.
+            TAG=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq ".[] | select((.body // \"\") | contains(\"/actions/runs/${GITHUB_RUN_ID})\")) | .tag_name" | sed -n 1p)
+          fi
+          if [ -z "$TAG" ]; then
+            TAGS=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/tags?per_page=100" --jq '.[].name')
+            TAG="$MONTH"; N=1
+            while grep -qxF "$TAG" <<< "$TAGS"; do N=$((N + 1)); TAG="${MONTH}.${N}"; done
+          fi
+          TITLE="${INPUT_TITLE:-${INPUT_NAME:-${GITHUB_REPOSITORY#*/}} ${KIND} ${MONTH_NAME}: ${VERSIONS}}"
+          echo "Release ${TAG}: ${TITLE}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
 
       - name: Generate Artifact Attestation
         if: inputs.generate_attestations
@@ -80,8 +130,9 @@ jobs:
           ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
         run: |
           TEXT="## Automated Build Release"
-          TEXT="${TEXT}\n\n**Build Tag:** \`${{ inputs.release_tag }}\`"
+          TEXT="${TEXT}\n\n**Build Tag:** \`${{ steps.name.outputs.tag }}\`"
           TEXT="${TEXT}\n**Date:** $(date)"
+          TEXT="${TEXT}\n**Run:** [${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
 
           if [[ -n "$ATTESTATION_URL" ]]; then
              TEXT="${TEXT}\n\n### 🔐 Security Attestations"
@@ -96,9 +147,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.release_tag }}
-          name: ${{ inputs.release_title || inputs.release_tag }}
+          tag_name: ${{ steps.name.outputs.tag }}
+          name: ${{ steps.name.outputs.title }}
           body: ${{ steps.body.outputs.release_body }}
           files: release_assets/*.zip
           prerelease: ${{ inputs.prerelease }}
+          make_latest: ${{ inputs.is_supplementary_build && 'false' || 'true' }}
           fail_on_unmatched_files: true
