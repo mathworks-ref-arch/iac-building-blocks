@@ -141,18 +141,21 @@ jobs:
           echo "ami_id=$(echo $FULL_ID | cut -d':' -f2)" >> $GITHUB_OUTPUT
           echo "region=$(echo $FULL_ID | cut -d':' -f1)" >> $GITHUB_OUTPUT
 
-      - name: Tag AMI Retention Period
-        if: inputs.skip_build == false && vars.AMI_RETENTION_DAYS != ''
+      - name: Tag AMI
+        if: inputs.skip_build == false
         env:
           AMI_ID: ${{ steps.export.outputs.ami_id }}
           AMI_REGION: ${{ steps.export.outputs.region }}
           RETENTION_DAYS: ${{ vars.AMI_RETENTION_DAYS }}
         run: |
-          # Tells cleanup tooling how many days to keep the AMI and its snapshots.
+          # Marks the AMI and its snapshots as built by this pipeline, with the retention period when set.
           SNAPSHOTS=$(aws ec2 describe-images --region "$AMI_REGION" --image-ids "$AMI_ID" \
             --query 'Images[0].BlockDeviceMappings[].Ebs.SnapshotId' --output text)
-          aws ec2 create-tags --region "$AMI_REGION" --resources "$AMI_ID" $SNAPSHOTS \
-            --tags Key=MinimumRetentionPeriod,Value="$RETENTION_DAYS"
+          TAGS=(Key=ManagedBy,Value=public-actions-ci)
+          if [ -n "$RETENTION_DAYS" ]; then
+            TAGS+=(Key=MinimumRetentionPeriod,Value="$RETENTION_DAYS")
+          fi
+          aws ec2 create-tags --region "$AMI_REGION" --resources "$AMI_ID" $SNAPSHOTS --tags "${TAGS[@]}"
 
       - name: Upload Packer Artifacts
         uses: actions/upload-artifact@v5
