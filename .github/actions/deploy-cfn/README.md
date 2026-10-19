@@ -9,7 +9,7 @@ This action deploys an ephemeral CloudFormation stack for integration and smoke 
 
 1. **Type Resolution:** Reads `refarch-type-mappings.json` to lookup the default parameter values and variable names (like identifying whether to use `SSHKeyName` or `RDPKeyName`) for the requested `refarch_type`.
 2. **Dynamic Parameter Injection:** Fetches the GitHub Runner's current IP address and injects it, along with standard inputs (VPC, Subnet, SSH Key), into a generated `params.json` file.
-3. **Execution:** Triggers `aws cloudformation create-stack` and blocks until the `stack-create-complete` signal is received.
+3. **Execution:** Triggers `aws cloudformation create-stack`, tagging the stack `ManagedBy=public-actions-ci`, and blocks until the `stack-create-complete` signal is received.
 4. **Data Retrieval:** Parses the final CloudFormation stack outputs into a flattened JSON key-value string.
 
 ### Inputs & Outputs
