@@ -59,7 +59,8 @@ jobs:
         working-directory: ${{ inputs.packer_dir }}
         env:
           # Existing instance profile for the build instance; empty keeps the template's default.
-          PKR_VAR_AWS_INSTANCE_PROFILE: ${{ vars.PACKER_INSTANCE_PROFILE }}
+          # Packer reads PKR_VAR_<name> as a template variable: https://developer.hashicorp.com/packer/guides/hcl/variables#from-environment-variables
+          PKR_VAR_AWS_INSTANCE_PROFILE: ${{ vars.PACKER_BUILDER_INSTANCE_PROFILE }}
         run: |
           packer init .
           packer build -color=false \
