@@ -23,7 +23,7 @@ on:
         type: string
         default: ''
       is_supplementary_build:
-        description: "When true, the title says build instead of release and the release isn't marked latest"
+        description: "When true, the title says build instead of release"
         required: false
         type: boolean
         default: false
@@ -152,5 +152,6 @@ jobs:
           body: ${{ steps.body.outputs.release_body }}
           files: release_assets/*.zip
           prerelease: ${{ inputs.prerelease }}
-          make_latest: ${{ inputs.is_supplementary_build && 'false' || 'true' }}
+          # Every new release becomes Latest, so the repository page shows the newest build.
+          make_latest: 'true'
           fail_on_unmatched_files: true
