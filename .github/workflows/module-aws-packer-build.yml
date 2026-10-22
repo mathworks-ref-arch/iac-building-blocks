@@ -142,6 +142,16 @@ jobs:
           echo "ami_id=$(echo $FULL_ID | cut -d':' -f2)" >> $GITHUB_OUTPUT
           echo "region=$(echo $FULL_ID | cut -d':' -f1)" >> $GITHUB_OUTPUT
 
+      - name: Upload Packer Artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.PACKER_ARTIFACT_NAME }}
+          path: |
+            ${{ inputs.packer_dir }}/${{ env.PACKER_MANIFEST_FILENAME }}
+            ${{ inputs.packer_dir }}/${{ env.PACKER_LOG_FILENAME }}
+          overwrite: true
+
       - name: Tag AMI
         if: inputs.skip_build == false
         env:
@@ -157,11 +167,3 @@ jobs:
             TAGS+=(Key=MinimumRetentionPeriod,Value="$RETENTION_DAYS")
           fi
           aws ec2 create-tags --region "$AMI_REGION" --resources "$AMI_ID" $SNAPSHOTS --tags "${TAGS[@]}"
-
-      - name: Upload Packer Artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: ${{ env.PACKER_ARTIFACT_NAME }}
-          path: |
-            ${{ inputs.packer_dir }}/${{ env.PACKER_MANIFEST_FILENAME }}
-            ${{ inputs.packer_dir }}/${{ env.PACKER_LOG_FILENAME }}
