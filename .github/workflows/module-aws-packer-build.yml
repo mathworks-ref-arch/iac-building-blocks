@@ -38,6 +38,16 @@ jobs:
       ami_id: ${{ steps.export.outputs.ami_id }}
       region: ${{ steps.export.outputs.region }}
     steps:
+      - name: Validate AMI Retention Days
+        if: vars.AMI_RETENTION_DAYS != ''
+        env:
+          RETENTION_DAYS: ${{ vars.AMI_RETENTION_DAYS }}
+        run: |
+          if ! [[ "$RETENTION_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::AMI_RETENTION_DAYS must be a whole number of days greater than 0, got '$RETENTION_DAYS'."
+            exit 1
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Configure AWS Credentials
