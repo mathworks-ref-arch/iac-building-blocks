@@ -44,11 +44,9 @@ jobs:
       attestations: write   # Required to store attestations
       actions: read         # Required to read when the run started
     # One release at a time per repository, so two runs can't take the same tag.
-    # queue: max keeps every waiting release; by default a newer one cancels the pending one.
     concurrency:
       group: gh-release-${{ github.repository }}
       cancel-in-progress: false
-      queue: max
 
     steps:
       - name: Checkout
