@@ -62,6 +62,7 @@ jobs:
           # Packer reads PKR_VAR_<name> as a template variable: https://developer.hashicorp.com/packer/guides/hcl/variables#from-environment-variables
           PKR_VAR_AWS_INSTANCE_PROFILE: ${{ vars.PACKER_BUILDER_INSTANCE_PROFILE }}
         run: |
+          set -o pipefail
           packer init .
           packer build -color=false \
             -var "MANIFEST_OUTPUT_FILE=${{ env.PACKER_MANIFEST_FILENAME }}" \
