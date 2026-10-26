@@ -173,7 +173,7 @@ jobs:
           # Marks the AMI and its snapshots as built by this pipeline, with the retention period when set.
           SNAPSHOTS=$(aws ec2 describe-images --region "$AMI_REGION" --image-ids "$AMI_ID" \
             --query 'Images[0].BlockDeviceMappings[].Ebs.SnapshotId' --output text)
-          TAGS=(Key=ManagedBy,Value=public-actions-ci)
+          TAGS=(Key=ManagedBy,Value=mw-public-actions-ci)
           if [ -n "$RETENTION_DAYS" ]; then
             TAGS+=(Key=MinimumRetentionPeriod,Value="$RETENTION_DAYS")
           fi
