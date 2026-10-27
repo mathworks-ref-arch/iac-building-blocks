@@ -162,6 +162,7 @@ runs:
           --template-url "https://${STAGING_BUCKET}.s3.${{ inputs.region }}.amazonaws.com/${TEMPLATE_KEY}" \
           --region ${{ inputs.region }} \
           --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+          --tags Key=ManagedBy,Value=mw-public-actions-ci \
           --parameters file://params.json
 
         echo "Waiting for stack creation..."

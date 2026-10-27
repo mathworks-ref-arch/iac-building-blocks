@@ -30,7 +30,7 @@ jobs:
   build:
     name: "${{ inputs.matlab_version }}: Packer Build"
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: ${{ fromJSON(vars.PACKER_TIMEOUT_MINUTES || '120') }}
     permissions:
       id-token: write
       contents: read
@@ -38,6 +38,16 @@ jobs:
       ami_id: ${{ steps.export.outputs.ami_id }}
       region: ${{ steps.export.outputs.region }}
     steps:
+      - name: Validate AMI Retention Days
+        if: vars.AMI_RETENTION_DAYS != ''
+        env:
+          RETENTION_DAYS: ${{ vars.AMI_RETENTION_DAYS }}
+        run: |
+          if ! [[ "$RETENTION_DAYS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::AMI_RETENTION_DAYS must be a whole number of days greater than 0, got '$RETENTION_DAYS'."
+            exit 1
+          fi
+
       - uses: actions/checkout@v5
 
       - name: Configure AWS Credentials
@@ -57,7 +67,12 @@ jobs:
       - name: Run Packer Build
         if: inputs.skip_build == false
         working-directory: ${{ inputs.packer_dir }}
+        env:
+          # Existing instance profile for the build instance; empty keeps the template's default.
+          # Packer reads PKR_VAR_<name> as a template variable: https://developer.hashicorp.com/packer/guides/hcl/variables#from-environment-variables
+          PKR_VAR_AWS_INSTANCE_PROFILE: ${{ vars.PACKER_BUILDER_INSTANCE_PROFILE }}
         run: |
+          set -o pipefail
           packer init .
           packer build -color=false \
             -var "MANIFEST_OUTPUT_FILE=${{ env.PACKER_MANIFEST_FILENAME }}" \
@@ -137,11 +152,29 @@ jobs:
           FULL_ID=$(jq -r '.builds[-1].artifact_id' ${{ env.PACKER_MANIFEST_FILENAME }})
           echo "ami_id=$(echo $FULL_ID | cut -d':' -f2)" >> $GITHUB_OUTPUT
           echo "region=$(echo $FULL_ID | cut -d':' -f1)" >> $GITHUB_OUTPUT
-      
+
       - name: Upload Packer Artifacts
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v5
         with:
           name: ${{ env.PACKER_ARTIFACT_NAME }}
           path: |
             ${{ inputs.packer_dir }}/${{ env.PACKER_MANIFEST_FILENAME }}
             ${{ inputs.packer_dir }}/${{ env.PACKER_LOG_FILENAME }}
+          overwrite: true
+
+      - name: Tag AMI
+        if: inputs.skip_build == false
+        env:
+          AMI_ID: ${{ steps.export.outputs.ami_id }}
+          AMI_REGION: ${{ steps.export.outputs.region }}
+          RETENTION_DAYS: ${{ vars.AMI_RETENTION_DAYS }}
+        run: |
+          # Marks the AMI and its snapshots as built by this pipeline, with the retention period when set.
+          SNAPSHOTS=$(aws ec2 describe-images --region "$AMI_REGION" --image-ids "$AMI_ID" \
+            --query 'Images[0].BlockDeviceMappings[].Ebs.SnapshotId' --output text)
+          TAGS=(Key=ManagedBy,Value=mw-public-actions-ci)
+          if [ -n "$RETENTION_DAYS" ]; then
+            TAGS+=(Key=MinimumRetentionPeriod,Value="$RETENTION_DAYS")
+          fi
+          aws ec2 create-tags --region "$AMI_REGION" --resources "$AMI_ID" $SNAPSHOTS --tags "${TAGS[@]}"
