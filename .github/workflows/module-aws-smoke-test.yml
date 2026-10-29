@@ -62,20 +62,19 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Generate test template
         uses: mathworks-ref-arch/iac-building-blocks/.github/actions/create-aws-template@main
         with:
           region_map: ${{ env.TEST_REGION_MAP }}
-          ami_id: ${{ inputs.ami_id }}
           output_filename: ${{ env.TEMPLATE_FILENAME }}
           artifact_name: ${{ env.TEST_ARTIFACT_NAME }}
           metatemplate_file_path: ${{ env.METATEMPLATE_PATH }}
           lambda_injections: ${{ inputs.lambda_injections }}
 
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
           aws-region: ${{ inputs.region }}
