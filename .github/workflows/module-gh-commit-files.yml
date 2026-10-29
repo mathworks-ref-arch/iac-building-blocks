@@ -29,12 +29,12 @@ jobs:
     
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
 
       - name: Download All Artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: ${{ inputs.artifacts_path }}
 
@@ -54,7 +54,7 @@ jobs:
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
 
       - name: Commit and Push
-        uses: stefanzweifel/git-auto-commit-action@v6
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: "Automated update of release artifacts and documentation"
           file_pattern: 'releases/ README.md LICENSE.md permission.md SECURITY.md'

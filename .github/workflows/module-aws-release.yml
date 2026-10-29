@@ -101,7 +101,7 @@ jobs:
       contents: read
     steps:
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
           aws-region: ${{ inputs.source_region }}
@@ -137,10 +137,10 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_RELEASE_ROLE }}
           aws-region: ${{ inputs.source_region }}
