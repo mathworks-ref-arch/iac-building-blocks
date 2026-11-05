@@ -23,6 +23,7 @@ def setup_args():
     parser.add_argument('--dual-repo-url',      required=True,  help='Dual Repo URL')
     parser.add_argument('--output-path',        required=False, help='Destination path for generated files', default='.')
     parser.add_argument('--template-file-name', required=False, help='File name of each release template', default='aws-matlab-template.json')
+    parser.add_argument('--releases-supported', required=False, help='Number of releases listed in the top-level README', default=5, type=int)
 
     return parser.parse_args()
 
@@ -37,23 +38,25 @@ def main():
 
     # Define variables
     SRC_DIR         = args.source_path
-    PERMISSIONS_DIR = os.path.join(SRC_DIR, 'internal', 'permissions')
+    PERMISSIONS_DIR = os.path.join(SRC_DIR, 'permissions')
     ARTIFACT_DIR    = args.artifact_path
     OUTPUT_DIR      = os.path.abspath(args.output_path)
 
     print(f"Source Directory: {SRC_DIR}")
     print(f"Output Directory: {OUTPUT_DIR}")
 
-    # Initialize jinja2
+    # Initialize jinja2; a value a template uses but isn't given fails the run.
     template_loader = jinja2.FileSystemLoader(searchpath=SRC_DIR)
-    template_env    = jinja2.Environment(loader=template_loader)
+    template_env    = jinja2.Environment(loader=template_loader, undefined=jinja2.StrictUndefined)
 
     # Process top-level files
     try:
         toplevel_readme, toplevel_permissions, toplevel_license = toplevel.process_files(
             template_env            = template_env,
+            releases_dir            = os.path.join(OUTPUT_DIR, 'releases'),
             target_releases         = target_versions,
             dual_repo_url           = args.dual_repo_url,
+            releases_supported      = args.releases_supported,
             permission_files_path   = PERMISSIONS_DIR,
             readme_path             = os.path.join('toplevel', 'README.md'),
             permissions_readme_path = os.path.join('toplevel', 'permission.md'),
@@ -63,14 +66,15 @@ def main():
         print(f"Error processing top-level files: {e}")
         sys.exit(1)
 
-    # Process release-specific files 
+    # Process release-specific files
     try:
         release_data = release.process_files(
             template_env                    = template_env,
             target_versions                 = target_versions,
             artifact_dir                    = ARTIFACT_DIR,
             s3_bucket_url                   = args.s3_bucket_url,
-            release_readme_template_path    = "README.md" 
+            template_file_name              = args.template_file_name,
+            release_readme_template_path    = "README.md"
         )
     except Exception as e:
         print(f"Error processing release files: {e}")
@@ -79,7 +83,7 @@ def main():
     # Define required file/folder structure
     repository_structure = {
         "README.md"         : toplevel_readme,
-        "permission.md"    : toplevel_permissions,
+        "permission.md"     : toplevel_permissions,
         "LICENSE.md"        : toplevel_license,
         "releases"          : {}
     }
@@ -91,7 +95,16 @@ def main():
             args.template_file_name: r['cf_template_content']
         }
 
-    utils.write_to_disk(OUTPUT_DIR, repository_structure)    
+    try:
+        written = utils.write_to_disk(OUTPUT_DIR, repository_structure)
+    except OSError as e:
+        print(f"Error writing release files: {e}")
+        sys.exit(1)
+
+    # The commit step stages exactly these files.
+    if 'GITHUB_OUTPUT' in os.environ:
+        with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+            f.write(f"files={' '.join(written)}\n")
     print("Processing complete.")
 
 if __name__ == "__main__":

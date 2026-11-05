@@ -43,10 +43,12 @@ on:
       release_template_file_name:
         description: |
           File name each release template is committed under, in
-          releases/<version>/ of the repository.
+          releases/<version>/ of the repository. Leave empty to use the
+          meta-template's file name, which the release job records.
+          Set it only to override that name.
           Example: "mjs-cluster-template.json"
         type: string
-        default: aws-matlab-template.json
+        default: ""
       release_files_pattern:
         description: |
           Glob pattern for files to include in the GitHub Release zip
@@ -118,6 +120,7 @@ jobs:
       release_title: ${{ inputs.release_title }}
       release_name: ${{ inputs.release_name }}
       is_supplementary_build: ${{ inputs.is_supplementary_build }}
+      target_commitish: ${{ needs.commit-release-files.outputs.release_sha || github.sha }}
       prerelease: false
       generate_attestations: ${{ inputs.generate_attestations }}
     secrets: inherit

@@ -4,8 +4,15 @@ import json
 import copy
 import re
 import sys
+import time
+import urllib.error
+import urllib.request
+from collections import defaultdict
+from itertools import chain
 from typing import List, Dict
 from pathlib import Path
+
+PERMISSION_POLICIES = ["provisioning_policy", "execution_policy", "execution_policy_trust"]
 
 def deserialize_target_versions(target_versions_string:str ) -> List[str]:
     try:
@@ -14,69 +21,100 @@ def deserialize_target_versions(target_versions_string:str ) -> List[str]:
         print(f"Error: --target-versions must be a valid JSON list. Got: {target_versions_string}")
         sys.exit(1)
 
-def calculate_removal_date(matlab_version: str) -> Dict[str, str]:
+def removal_date(release: str, releases_supported: int):
     """
-    Parses a Matlab version (e.g., 'R2020a' or '2020b') and calculates
-    the removal timeframe. Returns a dictionary with year and month.
+    Month and year in which a release's prebuilt artifacts are removed, given
+    how many releases are supported. Same rule as refarch-utils.
     """
-    # Regex handles 'R2020a', '2020a', '2020A', etc.
-    match = re.search(r"(\d{4})([ab])", matlab_version, re.IGNORECASE)
-    
-    if not match:
-        raise ValueError(f"Invalid Matlab version format: {matlab_version}")
+    year, letter = re.search(r"[Rr](\d{4})([ab])", release).groups()
+    if letter == "a":
+        month = "March" if releases_supported % 2 == 0 else "September"
+    else:
+        month = "September" if releases_supported % 2 == 0 else "March"
+    removal_year = int(year) + releases_supported // 2
+    if letter == "b" and releases_supported % 2 == 1:
+        removal_year += 1
+    return month, str(removal_year)
 
-    year = int(match.group(1))
-    edition = match.group(2).lower()
-
-    if edition == 'a':
-        return {'month': 'September', 'year': str(year + 2)}
-    elif edition == 'b':
-        return {'month': 'March', 'year': str(year + 3)}
-    
-    raise ValueError(f"Unknown edition: {edition}")
-
-def create_release_object(target_releases: List[str], dual_repo_url: str) -> List[Dict[str, str]]:
-
-    base_url = dual_repo_url.rstrip('/')
-    releases_data = []
-    
-    for release in sorted(target_releases, reverse=True):
+def github_get(url: str):
+    """GET a GitHub API URL and return the decoded JSON, retrying transient failures."""
+    request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    for attempt in range(1, 4):
         try:
-            dates = calculate_removal_date(release)
-            releases_data.append({
-                'label': release,
-                'dir': release,
-                'dual_url': f"{base_url}/releases/{release}",
-                'removal_month': dates['month'],
-                'removal_year': dates['year']
-            })
-        except ValueError as e:
-            print(f"Skipping {release}: {e}")
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.load(response)
+        except (urllib.error.URLError, TimeoutError) as e:
+            if attempt == 3:
+                raise
+            print(f"GitHub API request failed ({e}), retrying...")
+            time.sleep(5 * attempt)
 
-    return releases_data
+def list_dual_releases(dual_repo_url: str):
+    """
+    The release folders of the sister repository, as (releases, releases_url).
+    Each release is {'label', 'dual_url'}; releases_url is the URL of its releases folder.
+    """
+    owner, repo = dual_repo_url.rstrip('/').split('/')[-2:]
+    api = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+    contents = github_get(f"{api}/repos/{owner}/{repo}/contents/releases")
+    releases = [
+        {"label": item["name"].replace("_", "\\_"), "dual_url": item["html_url"]}
+        for item in contents
+    ]
+    releases_url = next(
+        item["html_url"]
+        for item in github_get(f"{api}/repos/{owner}/{repo}/contents/")
+        if item["name"] == "releases"
+    )
+    return releases, releases_url
+
+def create_release_object(releases_dir: str, target_releases: List[str], dual_repo_url: str, releases_supported: int) -> List[Dict[str, str]]:
+    """
+    The rows of the top-level release table: the release folders of this
+    repository (including the releases being written now) merged with those of
+    the sister repository, newest first, limited to the supported releases.
+    Same table as refarch-utils renders.
+    """
+    names = {p.name for p in Path(releases_dir).iterdir() if p.is_dir() and not p.name.startswith(".")} if Path(releases_dir).is_dir() else set()
+    names.update(target_releases)
+    main_releases = [{"label": name.replace("_", "\\_"), "dir": name} for name in names]
+
+    dual_releases, dual_releases_url = list_dual_releases(dual_repo_url)
+    newest_dual = max((r["label"] for r in dual_releases), default="")
+    for release in target_releases:
+        # Link a release the sister repository hasn't published yet.
+        if release > newest_dual:
+            dual_releases.append({"label": release, "dual_url": f"{dual_releases_url}/{release}"})
+
+    rows = defaultdict(lambda: {"label": None, "dir": None, "dual_url": None, "removal_month": None, "removal_year": None})
+    for release in chain(main_releases, dual_releases):
+        rows[release["label"]].update(release)
+    releases = [rows[label] for label in sorted(rows, reverse=True)]
+
+    if releases_supported > 0:
+        releases = releases[:releases_supported]
+        for release in releases:
+            release["removal_month"], release["removal_year"] = removal_date(release["label"], releases_supported)
+
+    return releases
 
 def create_permissions_object(permissions_path):
+    """
+    The permission policies under permissions_path, keyed by name, or an empty
+    dict when the repository publishes no permission policies.
+    """
+    path_obj = Path(permissions_path)
+    if not path_obj.is_dir():
+        return {}
 
     permissions_object = {}
-    path_obj = Path(permissions_path)
-    
-    if not path_obj.exists() or not path_obj.is_dir():
-        return permissions_object
-
-    for file_path in path_obj.iterdir():
-        if file_path.is_file() and file_path.suffix == '.json':
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    permissions_object[file_path.stem] = json.load(f)
-            except json.JSONDecodeError as e:
-                print(f"Error: {file_path.name} is not a valid JSON file. {e}")
-            except UnicodeDecodeError:
-                print(f"Error: Could not decode {file_path.name}")
-            except PermissionError:
-                print(f"Error: No permission to read {file_path.name}")
-            except Exception as e:
-                print(f"Unknown error reading {file_path.name}: {e}")
-                
+    for name in PERMISSION_POLICIES:
+        file_path = path_obj / f"{name}.json"
+        with open(file_path, "r", encoding="utf-8") as f:
+            permissions_object[name] = json.load(f)
     return permissions_object
 
 def remove_action_from_policy(policy: dict, action_to_remove: str) -> dict:
@@ -110,97 +148,32 @@ def remove_action_from_policy(policy: dict, action_to_remove: str) -> dict:
 def remove_actions_from_policy(policy: dict, actions_to_remove: list) -> dict:
     """Remove actions from policy without modifying the original."""
     policy_copy = copy.deepcopy(policy)
-    
+
     for action in actions_to_remove:
         policy_copy = remove_action_from_policy(policy_copy, action)
     return policy_copy
 
-def parse_template_json(template_path):
+def write_to_disk(base_dir: str, structure: dict) -> List[str]:
     """
-    Parses parameters and regions from the actual JSON file being released.
-    This ensures documentation matches the exact artifact.
-    """
-    try:
-        with open(template_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        print(f"Error reading template {template_path}: {e}")
-        return [], []
-    
-    regions = list(data.get("Mappings", {}).get("RegionMap", {}).keys())
-
-    params = []
-    for key, value in data.get("Parameters", {}).items():
-        params.append({
-            "label": key,
-            "description": value.get("Description", "")
-        })
-    return regions, params
-
-def validate_output_directory(path: Path):
-    """
-    Validates that the output directory exists (or can be created) 
-    and is writable.
-    """
-    try:
-        if not path.exists():
-            print(f"Output directory does not exist. Creating: {path}")
-            path.mkdir(parents=True, exist_ok=True)
-        
-        if not path.is_dir():
-            raise NotADirectoryError(f"The output path exists but is not a directory: {path}")
-        
-        if not os.access(path, os.W_OK):
-            raise PermissionError(f"Write permission denied for directory: {path}")
-            
-    except PermissionError as e:
-        print(f"ERROR: Permission denied. Cannot create or write to '{path}'.")
-        print(f"   Details: {e}")
-        print("   Check folder ownership (chown) or permissions (chmod).")
-        sys.exit(1)
-    except OSError as e:
-        print(f"ERROR: System error regarding path '{path}'.")
-        print(f"   Details: {e}")
-        sys.exit(1)
-
-def write_to_disk(base_dir: str, structure: dict):
-    """
-    Recursive function to write the virtual filesystem to disk.
-    Includes robust error handling for permissions and IO issues.
+    Write the virtual filesystem to disk and return the paths written,
+    relative to base_dir. Keys may contain slashes.
     """
     base_path = Path(base_dir).resolve()
-    
-    validate_output_directory(base_path)
+    base_path.mkdir(parents=True, exist_ok=True)
+    written = []
 
     def _write_recursive(current_path: Path, current_struct: dict):
         for name, content in current_struct.items():
-            target_path = current_path / name        
-            try:
-                if isinstance(content, dict):
-                    if not target_path.exists():
-                        target_path.mkdir(parents=True, exist_ok=True)
-                    elif not target_path.is_dir():
-                        raise NotADirectoryError(f"Path exists and is not a directory: {target_path}")
-                    
-                    _write_recursive(target_path, content)
-                else:
-                    if content is None: continue
-                    # IMPORTANT: This line allows the repository_structure dictionary to use slashes in keys, 
-                    # rather than requiring perfect nesting in the structure itself.
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(target_path, 'w', encoding='utf-8') as f:
-                        f.write(content)
-
-                    print(f"   Created: {target_path.relative_to(base_path)}")
-
-            except PermissionError:
-                print(f"ERROR: Permission denied writing: {target_path}")
-                # We do not exit here to try writing other files, 
-                # but depending on requirements, we might want to sys.exit(1)
-            except IsADirectoryError:
-                print(f"ERROR: Tried to write a file but path is a directory: {target_path}")
-            except OSError as e:
-                print(f"ERROR: OS Error writing {target_path}: {e}")
+            target_path = current_path / name
+            if isinstance(content, dict):
+                _write_recursive(target_path, content)
+            elif content is not None:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(target_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                written.append(str(target_path.relative_to(base_path)))
+                print(f"   Created: {written[-1]}")
 
     print(f"Writing files to: {base_path}...")
     _write_recursive(base_path, structure)
+    return written

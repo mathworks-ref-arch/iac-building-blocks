@@ -1,60 +1,75 @@
 # Copyright 2026 The MathWorks, Inc.
 """Render the per-release files for the released repository.
 
-For each target version, locates the built CloudFormation template, parses its
-regions and parameters, and renders the release README from the Jinja2
-template. Returns the rendered README plus the raw template content for each
+For each target version, locates the built CloudFormation template and renders
+the release README from the Jinja2 template with the same data refarch-utils
+passes. Returns the rendered README plus the raw template content for each
 release so the caller can lay them out on disk.
 """
-import utils
+import json
 import os
 
-def process_readme(template_env, regions, parameters, template_url, version, readme_path):
-    """
-    Loads the README template and renders it with release data.
-    """
-    template = template_env.get_template(readme_path)
-    
-    return template.render(
-        regions         = regions,
-        parameters      = parameters,
-        template_url    = template_url,
-        version         = version
-    )
+COPY_AMI_SOURCE_REGION = "us-east-1"
+COPY_AMI_LAMBDA_VERSION = "v1/0/0"
 
-def process_single_release(template_env, version, artifact_dir, s3_bucket_url, release_readme_template_path):
+def readme_data(template, version, template_url):
     """
-    Processes a single release: finds the CF template, parses it, renders the README.
-    
+    The values the release README template renders with: launch regions,
+    parameter table, template URL and the copy-AMI link.
+    """
+    region_map = template.get("Mappings", {}).get("RegionMap", {})
+    # Regions without a prebuilt AMI hold a placeholder for custom AMIs.
+    regions = [region for region, entry in region_map.items() if str(entry.get("AMI", "")).startswith("ami-")]
+
+    copy_source_ami = region_map.get(COPY_AMI_SOURCE_REGION, {}).get("AMI", "")
+    if not copy_source_ami.startswith("ami-"):
+        raise ValueError(f"No {COPY_AMI_SOURCE_REGION} AMI in the {version} release template; the copy-AMI link needs one")
+
+    parameter_labels = template.get("Metadata", {}).get("AWS::CloudFormation::Interface", {}).get("ParameterLabels", {})
+    parameters = [
+        {
+            "name": key,
+            "label": (parameter_labels.get(key, {}).get("default") or key).strip(),
+            "description": value["Description"].replace("<", "\\<").replace("|", "\\|"),
+        }
+        for key, value in template["Parameters"].items()
+    ]
+
+    return {
+        "template_url": template_url,
+        "regions": regions,
+        "parameters": parameters,
+        "copy_ami_parameters": {
+            "copy_source_ami_region": COPY_AMI_SOURCE_REGION,
+            "copy_source_ami_id": copy_source_ami,
+            "copy_ami_lambda_version": COPY_AMI_LAMBDA_VERSION,
+        },
+        "CURRENT_RELEASE": version,
+        "version": version,
+    }
+
+def process_single_release(template_env, version, artifact_dir, s3_bucket_url, template_file_name, release_readme_template_path):
+    """
+    Processes a single release: reads the built template and renders the README.
+
     Returns:
         dict: {
-            'version': version, 
-            'readme_content': str, 
-            'cf_template_content': str, 
+            'version': version,
+            'readme_content': str,
+            'cf_template_content': str,
         }
     """
-    cf_filename = f"{version}-release-template.json"
-    cft_path = os.path.join(artifact_dir, cf_filename)
-    
+    cft_path = os.path.join(artifact_dir, f"{version}-release-template.json")
     if not os.path.exists(cft_path):
-        print(f"Warning: Artifact for {version} not found at {cft_path}")
-        return None
-    
-    regions, parameters = utils.parse_template_json(cft_path)
-    template_url = f"{s3_bucket_url.rstrip('/')}/{version}/{cf_filename}"
-    
-    readme_content = process_readme(
-        template_env    = template_env,
-        regions         = regions,
-        parameters      = parameters,
-        template_url    = template_url,
-        version         = version,
-        readme_path     = release_readme_template_path
-        )
+        raise FileNotFoundError(f"No release template for {version} at {cft_path}")
 
-    # Read the raw CF template content so the caller can write it to disk.
     with open(cft_path, 'r', encoding='utf-8') as f:
         cft_content = f.read()
+
+    template_url = f"{s3_bucket_url.rstrip('/')}/{version}/{template_file_name}"
+    readme_content = template_env.get_template(release_readme_template_path).render(
+        **readme_data(json.loads(cft_content), version, template_url)
+    )
 
     return {
         'version': version,
@@ -62,18 +77,15 @@ def process_single_release(template_env, version, artifact_dir, s3_bucket_url, r
         'cf_template_content': cft_content,
     }
 
-def process_files(template_env, target_versions, artifact_dir, s3_bucket_url, release_readme_template_path):
-    release_outputs = []
-    
-    for version in target_versions:
-        result = process_single_release(
-            template_env, 
-            version, 
-            artifact_dir, 
-            s3_bucket_url, 
+def process_files(template_env, target_versions, artifact_dir, s3_bucket_url, template_file_name, release_readme_template_path):
+    return [
+        process_single_release(
+            template_env,
+            version,
+            artifact_dir,
+            s3_bucket_url,
+            template_file_name,
             release_readme_template_path
         )
-        if result:
-            release_outputs.append(result)
-            
-    return release_outputs
+        for version in target_versions
+    ]

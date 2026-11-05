@@ -20,12 +20,17 @@ This action handles the final documentation assembly prior to a GitHub Release. 
 
 | Input | Required | Description |
 | --- | --- | --- |
-| `target_versions` | Yes | JSON string array of the MATLAB versions being released. |
-| `source_path` | No | Path to the raw Jinja2 markdown templates. Defaults to `./src`. |
+| `target_versions` | Yes | JSON string array of the MATLAB versions being released. Each needs a `<version>-release-template.json` artifact. |
+| `source_path` | No | Path to the Jinja2 templates: `README.md`, `toplevel/` and, if the repository publishes permission documentation, `permissions/`. Defaults to `./.github/release-templates`. |
 | `artifact_path` | No | Path to the directory containing downloaded CFN artifacts. |
 | `s3_bucket_url` | Yes | Base URL of the production S3 bucket hosting the templates. |
 | `dual_repo_url` | Yes | URL pointer to the sister repository (for cross-OS referencing). |
 | `template_file_name` | No | File name each release template is written under. Defaults to `aws-matlab-template.json`. |
+| `releases_supported` | No | Number of releases listed in the top-level README. Defaults to `5`. |
+
+| Output | Description |
+| --- | --- |
+| `files` | Space-separated paths of the files written, relative to the repository root. |
 
 ### Example Usage
 
@@ -34,7 +39,7 @@ This action handles the final documentation assembly prior to a GitHub Release. 
   uses: mathworks-ref-arch/iac-building-blocks/.github/actions/process-release-files@main
   with:
     target_versions: '["R2025a", "R2024b"]'
-    source_path: './src'
+    source_path: './.github/release-templates'
     artifact_path: './artifacts'
     s3_bucket_url: 's3://my-prod-bucket/templates/'
     dual_repo_url: 'https://github.com/my-org/sister-repo'

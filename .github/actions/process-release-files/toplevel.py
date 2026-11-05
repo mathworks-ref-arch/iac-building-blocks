@@ -9,37 +9,42 @@ import utils
 import json
 from datetime import datetime
 
+ADMIN_LEVEL_ACTIONS = [
+    "iam:AttachRolePolicy",
+    "iam:CreateRole",
+    "iam:DeleteRole",
+    "iam:DeleteRolePolicy",
+    "iam:DetachRolePolicy",
+    "iam:PutRolePolicy",
+    "iam:TagRole",
+]
+
 def process_readme(template_env, releases_data, dual_repo_url, readme_path):
     """
     Loads the README template and renders it with release data.
     """
     template = template_env.get_template(readme_path)
-    
+
     return template.render(
-        releases=releases_data, 
+        releases=releases_data,
         dual_url=dual_repo_url.rstrip('/')
     )
 
 def process_permissions(template_env, permissions_data, permissions_readme_path):
     """
-    Loads the permissions template and renders it.
+    Loads the permissions template and renders it, or returns None when the
+    repository publishes no permission policies.
     """
-    ADMIN_LEVEL_ACTIONS = [
-        "iam:AttachRolePolicy",
-        "iam:CreateRole",
-        "iam:DeleteRole",
-        "iam:DeleteRolePolicy",
-        "iam:DetachRolePolicy",
-        "iam:PutRolePolicy",
-        "iam:TagRole",
-    ]
+    if not permissions_data:
+        return None
+
     restricted_provisioning_policy = utils.remove_actions_from_policy(
-        permissions_data['provisioning_policy'],    
+        permissions_data['provisioning_policy'],
         ADMIN_LEVEL_ACTIONS
     )
 
     template = template_env.get_template(permissions_readme_path)
-    
+
     return template.render(
         full_provisioning_policy        = json.dumps(permissions_data['provisioning_policy'], indent=4),
         restricted_provisioning_policy  = json.dumps(restricted_provisioning_policy, indent=4),
@@ -55,18 +60,20 @@ def process_license(template_env, year, license_readme_path):
     return template.render(current_year=year)
 
 def process_files(
-        template_env, 
-        target_releases, 
-        dual_repo_url, 
-        permission_files_path, 
-        readme_path, 
-        permissions_readme_path, 
+        template_env,
+        releases_dir,
+        target_releases,
+        dual_repo_url,
+        releases_supported,
+        permission_files_path,
+        readme_path,
+        permissions_readme_path,
         license_readme_path
     ):
     """
     Orchestrates the data gathering and rendering for top-level files.
     """
-    releases_data       = utils.create_release_object(target_releases, dual_repo_url)
+    releases_data       = utils.create_release_object(releases_dir, target_releases, dual_repo_url, releases_supported)
     permissions_data    = utils.create_permissions_object(permission_files_path)
     current_year        = datetime.now().year
 

@@ -7,9 +7,9 @@ inputs:
     description: 'JSON string of versions to process artifacts for'
     required: true
   source_path:
-    description: 'Path where templates for refarch creation are located'
+    description: 'Path of the release templates (README.md, toplevel/, permissions/) the repository publishes'
     required: false
-    default: './src'
+    default: './.github/release-templates'
   artifact_path:
     description: 'Path where artifacts are currently located'
     required: false
@@ -23,10 +23,19 @@ inputs:
   template_file_name:
     description: 'File name each release template is written under in the repository'
     default: 'aws-matlab-template.json'
+  releases_supported:
+    description: 'Number of releases listed in the top-level README'
+    required: false
+    default: '5'
   python_version:
     description: 'Python version to set up for running the processing scripts'
     required: false
     default: '3.11'
+
+outputs:
+  files:
+    description: 'Space-separated paths of the files written, relative to the repository root'
+    value: ${{ steps.process.outputs.files }}
 
 runs:
   using: "composite"
@@ -41,14 +50,17 @@ runs:
       run: pip install jinja2
 
     - name: Run Processing Script
+      id: process
       shell: bash
       env:
+        GITHUB_TOKEN: ${{ github.token }}
         TARGET_VERSIONS: ${{ inputs.target_versions }}
         SOURCE_PATH: ${{ inputs.source_path }}
         ARTIFACT_PATH: ${{ inputs.artifact_path }}
         S3_BUCKET_URL: ${{ inputs.s3_bucket_url }}
         DUAL_REPO_URL: ${{ inputs.dual_repo_url }}
         TEMPLATE_FILE_NAME: ${{ inputs.template_file_name }}
+        RELEASES_SUPPORTED: ${{ inputs.releases_supported }}
       run: |
         # We execute the script located in THIS action's directory
         python ${{ github.action_path }}/processor.py \
@@ -57,5 +69,6 @@ runs:
           --artifact-path "$ARTIFACT_PATH" \
           --s3-bucket-url "$S3_BUCKET_URL" \
           --dual-repo-url "$DUAL_REPO_URL" \
-          --template-file-name "$TEMPLATE_FILE_NAME"
+          --template-file-name "$TEMPLATE_FILE_NAME" \
+          --releases-supported "$RELEASES_SUPPORTED"
 
