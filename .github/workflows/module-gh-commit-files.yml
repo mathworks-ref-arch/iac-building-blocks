@@ -7,9 +7,6 @@ on:
       target_versions:
         required: true
         type: string
-      s3_bucket_url:
-        required: true
-        type: string
       dual_repo_url:
         required: true
         type: string
@@ -70,6 +67,7 @@ jobs:
         run: |
           # Flatten the artifact structure so the script finds them easily
           find ${{ inputs.artifacts_path }} -name "${{ inputs.release_template_name_pattern }}" -exec mv {} ${{ inputs.artifacts_path }}/ \;
+          find ${{ inputs.artifacts_path }} -name "*-release-template-url.txt" -exec mv {} ${{ inputs.artifacts_path }}/ \;
 
       - name: Resolve Template File Name
         id: template_name
@@ -112,7 +110,6 @@ jobs:
         with:
           target_versions: ${{ inputs.target_versions }}
           artifact_path: '${{ inputs.artifacts_path }}'
-          s3_bucket_url: ${{ inputs.s3_bucket_url }}
           dual_repo_url: ${{ inputs.dual_repo_url }}
           template_file_name: ${{ steps.template_name.outputs.name }}
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}

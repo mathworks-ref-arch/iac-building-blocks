@@ -13,11 +13,11 @@ on:
         type: string
       s3_bucket_url:
         description: |
-          Base URL of the S3 bucket where release templates are
-          published for distribution.
-          Example: "https://s3.amazonaws.com/matlab-on-aws-win"
-        required: true
+          Not used. The release README links the URL the release job
+          published the template at. Kept so existing callers still run.
+        required: false
         type: string
+        default: ''
       dual_repo_url:
         description: |
           URL of the other OS variant repository for the same product.
@@ -102,7 +102,6 @@ jobs:
     uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-gh-commit-files.yml@experimental
     with:
       target_versions: ${{ inputs.target_versions }}
-      s3_bucket_url: ${{ inputs.s3_bucket_url }}
       dual_repo_url: ${{ inputs.dual_repo_url }}
       artifacts_path: ${{ inputs.artifacts_path }}
       release_template_name_pattern: ${{ inputs.release_template_name_pattern }}

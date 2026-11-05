@@ -20,10 +20,9 @@ This action handles the final documentation assembly prior to a GitHub Release. 
 
 | Input | Required | Description |
 | --- | --- | --- |
-| `target_versions` | Yes | JSON string array of the MATLAB versions being released. Each needs a `<version>-release-template.json` artifact. |
+| `target_versions` | Yes | JSON string array of the MATLAB versions being released. Each needs a `<version>-release-template.json` artifact and a `<version>-release-template-url.txt` with the URL the template was published at. |
 | `source_path` | No | Path to the Jinja2 templates: `README.md`, `toplevel/` and, if the repository publishes permission documentation, `permissions/`. Defaults to `./.github/release-templates`. |
 | `artifact_path` | No | Path to the directory containing downloaded CFN artifacts. |
-| `s3_bucket_url` | Yes | Base URL of the production S3 bucket hosting the templates. |
 | `dual_repo_url` | Yes | URL pointer to the sister repository (for cross-OS referencing). |
 | `template_file_name` | No | File name each release template is written under. Defaults to `aws-matlab-template.json`. |
 | `releases_supported` | No | Number of releases listed in the top-level README. Defaults to `5`. |
@@ -41,7 +40,6 @@ This action handles the final documentation assembly prior to a GitHub Release. 
     target_versions: '["R2025a", "R2024b"]'
     source_path: './.github/release-templates'
     artifact_path: './artifacts'
-    s3_bucket_url: 's3://my-prod-bucket/templates/'
     dual_repo_url: 'https://github.com/my-org/sister-repo'
 
 ```

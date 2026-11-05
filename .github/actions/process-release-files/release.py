@@ -48,7 +48,7 @@ def readme_data(template, version, template_url):
         "version": version,
     }
 
-def process_single_release(template_env, version, artifact_dir, s3_bucket_url, template_file_name, release_readme_template_path):
+def process_single_release(template_env, version, artifact_dir, template_file_name, release_readme_template_path):
     """
     Processes a single release: reads the built template and renders the README.
 
@@ -66,7 +66,12 @@ def process_single_release(template_env, version, artifact_dir, s3_bucket_url, t
     with open(cft_path, 'r', encoding='utf-8') as f:
         cft_content = f.read()
 
-    template_url = f"{s3_bucket_url.rstrip('/')}/{version}/{template_file_name}"
+    # The release job records the URL it published the template at.
+    url_path = os.path.join(artifact_dir, f"{version}-release-template-url.txt")
+    if not os.path.exists(url_path):
+        raise FileNotFoundError(f"No published template URL for {version} at {url_path}")
+    with open(url_path, 'r', encoding='utf-8') as f:
+        template_url = f.read().strip()
     readme_content = template_env.get_template(release_readme_template_path).render(
         **readme_data(json.loads(cft_content), version, template_url)
     )
@@ -77,13 +82,12 @@ def process_single_release(template_env, version, artifact_dir, s3_bucket_url, t
         'cf_template_content': cft_content,
     }
 
-def process_files(template_env, target_versions, artifact_dir, s3_bucket_url, template_file_name, release_readme_template_path):
+def process_files(template_env, target_versions, artifact_dir, template_file_name, release_readme_template_path):
     return [
         process_single_release(
             template_env,
             version,
             artifact_dir,
-            s3_bucket_url,
             template_file_name,
             release_readme_template_path
         )

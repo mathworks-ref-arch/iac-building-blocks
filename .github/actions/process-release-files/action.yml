@@ -14,9 +14,6 @@ inputs:
     description: 'Path where artifacts are currently located'
     required: false
     default: './artifacts'
-  s3_bucket_url:
-    description: 'Production S3 bucket URL'
-    required: true
   dual_repo_url:
     description: 'URL to the sister repository (same offering, different OS)'
     required: true
@@ -57,7 +54,6 @@ runs:
         TARGET_VERSIONS: ${{ inputs.target_versions }}
         SOURCE_PATH: ${{ inputs.source_path }}
         ARTIFACT_PATH: ${{ inputs.artifact_path }}
-        S3_BUCKET_URL: ${{ inputs.s3_bucket_url }}
         DUAL_REPO_URL: ${{ inputs.dual_repo_url }}
         TEMPLATE_FILE_NAME: ${{ inputs.template_file_name }}
         RELEASES_SUPPORTED: ${{ inputs.releases_supported }}
@@ -67,7 +63,6 @@ runs:
           --target-versions "$TARGET_VERSIONS" \
           --source-path "$SOURCE_PATH" \
           --artifact-path "$ARTIFACT_PATH" \
-          --s3-bucket-url "$S3_BUCKET_URL" \
           --dual-repo-url "$DUAL_REPO_URL" \
           --template-file-name "$TEMPLATE_FILE_NAME" \
           --releases-supported "$RELEASES_SUPPORTED"

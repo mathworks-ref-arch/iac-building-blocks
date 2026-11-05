@@ -19,7 +19,6 @@ def setup_args():
     parser.add_argument('--target-versions',    required=True,  help='JSON string of versions')
     parser.add_argument('--source-path',        required=True,  help='Path to source templates')
     parser.add_argument('--artifact-path',      required=True,  help='Path to artifacts')
-    parser.add_argument('--s3-bucket-url',      required=True,  help='S3 Bucket URL')
     parser.add_argument('--dual-repo-url',      required=True,  help='Dual Repo URL')
     parser.add_argument('--output-path',        required=False, help='Destination path for generated files', default='.')
     parser.add_argument('--template-file-name', required=False, help='File name of each release template', default='aws-matlab-template.json')
@@ -72,7 +71,6 @@ def main():
             template_env                    = template_env,
             target_versions                 = target_versions,
             artifact_dir                    = ARTIFACT_DIR,
-            s3_bucket_url                   = args.s3_bucket_url,
             template_file_name              = args.template_file_name,
             release_readme_template_path    = "README.md"
         )

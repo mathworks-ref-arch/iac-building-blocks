@@ -105,7 +105,6 @@ jobs:
       refarch_type: ${{ inputs.refarch_type }}
       matlab_version: ${{ inputs.matlab_version }}
       source_region: ${{ needs.build.outputs.region }}
-      target_regions: ${{ vars.TARGET_REGIONS }}
       metatemplate_file_path: ${{ inputs.metatemplate_file_path }}
       lambda_injections: ${{ inputs.lambda_injections }}
       mock_build: ${{ inputs.skip_build }}
