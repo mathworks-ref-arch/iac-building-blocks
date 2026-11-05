@@ -9,9 +9,9 @@ on:
         required: false
         type: string
       search_dir:
-        description: "Directory to scan for release folders"
+        description: "Directory to scan: Packer release configs (<version>.pkrvars.hcl) or release folders (<version>/)"
         required: false
-        default: "./releases"
+        default: "./packer/v1/release-config"
         type: string
     outputs:
       matrix:
