@@ -25,7 +25,7 @@ A copy that is not made public is a test copy. A public run never reuses a test 
 
 ```yaml
 - name: Remove Test Copies
-  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami/cleanup@main
+  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami/cleanup@experimental
   with:
     regions: 'ap-northeast-3'
 ```
@@ -55,7 +55,7 @@ A copy that is not made public is a test copy. A public run never reuses a test 
 ```yaml
 - name: Publish Built AMI
   id: publish_ami
-  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami@main
+  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami@experimental
   with:
     ami_id: 'ami-0123456789abcdef0'
     source_ami_region: 'us-east-1'

@@ -33,6 +33,7 @@ jobs:
         with:
           repository: mathworks-ref-arch/iac-building-blocks
           path: _iac-building-blocks
+          ref: experimental
 
       - name: Calculate Versions
         id: set-matrix

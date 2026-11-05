@@ -148,7 +148,7 @@ jobs:
 
       - name: Publish AMI
         id: publish_ami
-        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami@main
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami@experimental
         with:
           ami_id: ${{ inputs.ami_id }}
           source_ami_region: ${{ inputs.source_region }}
@@ -160,7 +160,7 @@ jobs:
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
 
       - name: Generate Release Template
-        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/create-aws-template@main
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/create-aws-template@experimental
         with:
           region_map: ${{ steps.publish_ami.outputs.region_map_json }}
           output_filename: ${{ env.TEMPLATE_FILENAME }}
@@ -185,7 +185,7 @@ jobs:
 
       - name: Publish Release Template
         id: publish_template
-        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-release-template@main
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-release-template@experimental
         with:
           template_file: ${{ env.TEMPLATE_FILENAME }}
           bucket: ${{ vars.RELEASE_BUCKET }}
@@ -212,7 +212,7 @@ jobs:
 
       - name: Remove Test Copies
         if: success() && env.DRY_RUN == 'true'
-        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami/cleanup@main
+        uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-ami/cleanup@experimental
         with:
           regions: ${{ inputs.target_regions }}
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}

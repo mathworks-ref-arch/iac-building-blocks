@@ -36,7 +36,7 @@ This action handles the final documentation assembly prior to a GitHub Release. 
 
 ```yaml
 - name: Process and Assemble Documentation
-  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/process-release-files@main
+  uses: mathworks-ref-arch/iac-building-blocks/.github/actions/process-release-files@experimental
   with:
     target_versions: '["R2025a", "R2024b"]'
     source_path: './.github/release-templates'
