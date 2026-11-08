@@ -44,7 +44,7 @@ env:
   METATEMPLATE_PATH: "./${{ inputs.metatemplate_file_path }}"
   TEMPLATE_FILENAME: "${{ inputs.matlab_version }}-release-template.json"
   RELEASE_ARTIFACT_NAME: "${{ inputs.matlab_version }}-release-template"
-  # Unless RELEASE_DRY_RUN is 'false', nothing is made public and the template is written privately.
+  # Unless RELEASE_DRY_RUN is 'false', the AMI copies are not made public.
   DRY_RUN: ${{ vars.RELEASE_DRY_RUN != 'false' }}
 
 jobs:
@@ -181,7 +181,6 @@ jobs:
           template_file: ${{ env.TEMPLATE_FILENAME }}
           bucket: ${{ vars.RELEASE_BUCKET }}
           key: ${{ steps.template_key.outputs.key }}
-          acl: ${{ env.DRY_RUN == 'true' && 'private' || 'public-read' }}
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
 
       # The commit-back job links the release README to the template as published.
@@ -207,7 +206,7 @@ jobs:
         run: |
           python3 - >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           import json, os
-          dry_run = " (dry run: nothing made public)" if os.environ["DRY_RUN"] == "true" else ""
+          dry_run = " (dry run: AMI copies not made public)" if os.environ["DRY_RUN"] == "true" else ""
           print(f"### {os.environ['MATLAB_VERSION']} release{dry_run}\n")
           print(f"Template ({os.environ['TEMPLATE_RESULT']}): {os.environ['TEMPLATE_URL']}\n")
           print("| Region | AMI | State |\n| :--- | :--- | :--- |")
@@ -221,3 +220,36 @@ jobs:
         with:
           regions: ${{ vars.TARGET_REGIONS }}
           python_version: ${{ vars.PYTHON_VERSION || '3.11' }}
+
+  # The copies exist now, so the release account no longer needs the source AMI.
+  # After a failed release the share stays, for the re-run.
+  unshare:
+    name: "${{ inputs.matlab_version }}: Stop sharing the AMI with the release account"
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          aws-region: ${{ inputs.source_region }}
+
+      - name: Unshare AMI
+        env:
+          AMI_ID: ${{ inputs.ami_id }}
+          RELEASE_ROLE: ${{ secrets.AWS_RELEASE_ROLE }}
+        run: |
+          RELEASE_ACCOUNT=$(echo "$RELEASE_ROLE" | cut -d: -f5)
+          BUILD_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          if [ "$RELEASE_ACCOUNT" == "$BUILD_ACCOUNT" ]; then
+            echo "The release role is in the build account. Nothing to unshare."
+            exit 0
+          fi
+          aws ec2 modify-image-attribute --image-id "$AMI_ID" --launch-permission "Remove=[{UserId=$RELEASE_ACCOUNT}]"
+          for SNAPSHOT_ID in $(aws ec2 describe-images --image-ids "$AMI_ID" --query 'Images[0].BlockDeviceMappings[].Ebs.SnapshotId' --output text); do
+            aws ec2 modify-snapshot-attribute --snapshot-id "$SNAPSHOT_ID" --attribute createVolumePermission --operation-type remove --user-ids "$RELEASE_ACCOUNT"
+          done
+          echo "Stopped sharing $AMI_ID and its snapshots with the release account."

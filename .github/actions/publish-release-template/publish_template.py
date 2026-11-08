@@ -29,7 +29,7 @@ def get_args():
     parser.add_argument('--template-file', required=True)
     parser.add_argument('--bucket', required=True)
     parser.add_argument('--key', required=True)
-    parser.add_argument('--acl', default='public-read', help="Canned ACL, empty for none")
+    parser.add_argument('--acl', default='', help="Canned ACL, empty for none")
     parser.add_argument('--region', default='us-east-1', help="Region of the bucket")
     return parser.parse_args()
 

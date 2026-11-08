@@ -17,7 +17,7 @@ The object carries `github-run-id` and `github-repository` metadata, which is wh
 | `template_file` | Yes | Path to the compiled release template. |
 | `bucket` | Yes | S3 bucket to publish to. |
 | `key` | Yes | Object key, e.g. `R2026b/aws-matlab-template.json`. |
-| `acl` | No | Canned ACL for the object. Defaults to `public-read`; empty sets none. |
+| `acl` | No | Canned ACL for the object, e.g. `public-read`. Defaults to none, so the bucket policy decides who can read it. |
 | `region` | No | Region of the bucket. Defaults to `us-east-1`. |
 | `python_version` | No | Python version for the publish script. Defaults to `3.11`. |
 

@@ -12,9 +12,9 @@ inputs:
     description: 'Object key, e.g. R2026b/aws-matlab-template.json'
     required: true
   acl:
-    description: 'Canned ACL for the object (e.g. public-read, private). Empty sets none'
+    description: 'Canned ACL for the object (e.g. public-read). Empty sets none, so the bucket policy decides who can read it'
     required: false
-    default: 'public-read'
+    default: ''
   region:
     description: 'Region of the bucket'
     required: false

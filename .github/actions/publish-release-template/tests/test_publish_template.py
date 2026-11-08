@@ -29,7 +29,6 @@ def put_params(**extra):
         'Body': BODY,
         'ContentType': 'application/json',
         'Metadata': {pt.RUN_ID_KEY: str(RUN_ID), pt.REPOSITORY_KEY: REPO},
-        'ACL': 'public-read',
     }
     params.update(extra)
     return params
@@ -60,7 +59,7 @@ class PublishTest(unittest.TestCase):
         self.stub.add_response('put_object', {'ETag': f'"{MD5}"', 'VersionId': 'v2'},
                                put_params(IfMatch=OLD_ETAG))
 
-    def run_publish(self, acl='public-read'):
+    def run_publish(self, acl=''):
         return pt.publish(self.s3, BODY, BUCKET, KEY, acl, REPO, RUN_ID)
 
     def test_new_key_is_created(self):
@@ -116,13 +115,11 @@ class PublishTest(unittest.TestCase):
 
     def test_acl_is_passed_through(self):
         self.stub.add_response('put_object', {'ETag': f'"{MD5}"'},
-                               put_params(IfNoneMatch='*', ACL='private'))
-        self.assertEqual(self.run_publish(acl='private'), ('created', ''))
+                               put_params(IfNoneMatch='*', ACL='public-read'))
+        self.assertEqual(self.run_publish(acl='public-read'), ('created', ''))
 
     def test_empty_acl_sets_none(self):
-        params = put_params(IfNoneMatch='*')
-        del params['ACL']
-        self.stub.add_response('put_object', {'ETag': f'"{MD5}"'}, params)
+        self.stub.add_response('put_object', {'ETag': f'"{MD5}"'}, put_params(IfNoneMatch='*'))
         self.assertEqual(self.run_publish(acl=''), ('created', ''))
 
     def test_verify_accepts_own_write(self):
