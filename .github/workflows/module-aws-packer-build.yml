@@ -54,7 +54,7 @@ jobs:
         if: inputs.skip_build == false
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          role-to-assume: ${{ secrets.AWS_BUILD_ROLE }}
           aws-region: ${{ vars.AWS_REGION }}
           role-duration-seconds: ${{ vars.AWS_ROLE_DURATION_SECONDS || 7200 }}
 

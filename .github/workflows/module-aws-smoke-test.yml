@@ -76,7 +76,7 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ secrets.AWS_OIDC_ROLE }}
+          role-to-assume: ${{ secrets.AWS_BUILD_ROLE }}
           aws-region: ${{ inputs.region }}
 
       - name: Deploy Infrastructure
