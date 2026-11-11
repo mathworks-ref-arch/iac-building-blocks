@@ -21,7 +21,7 @@ This action copies a source AMI into a list of target regions, waits until every
 | `mw-github-run` | `<repository>/<run id>` of the workflow run |
 | `mw-release-test` | `true`, only when `make_public` is `false` |
 
-A copy that is not made public is a test copy. A public run never reuses a test copy. `cleanup.py --regions <list> --github-run <repository>/<run id>` deregisters the test copies of one run, deletes their snapshots and checks nothing is left; it never touches resources without `mw-release-test=true`. In a workflow, use the `publish-ami/cleanup` action, which runs it for the current run:
+A copy that is not made public is a test copy. A public run never reuses a test copy. `cleanup.py --regions <list> --github-run <repository>/<run id>` deregisters the test copies of one run, deletes their snapshots and checks nothing is left; it never touches resources without `mw-release-test=true`. If the role may not delete them, the copies stay and are listed as a warning. In a workflow, use the `publish-ami/cleanup` action, which runs it for the current run:
 
 ```yaml
 - name: Remove Test Copies

@@ -4,9 +4,11 @@
 Deregisters the AMIs tagged ``mw-release-test=true`` and
 ``mw-github-run=<repository>/<run id>`` in the given regions, deletes their
 snapshots, and verifies that nothing tagged that way is left. Anything without
-the test tag is never touched.
+the test tag is never touched. A role that may not delete keeps its copies:
+they are listed as a warning, not an error.
 """
 import argparse
+import os
 import sys
 import time
 
@@ -17,6 +19,7 @@ TEST_TAG = "mw-release-test"
 RUN_TAG = "mw-github-run"
 SNAPSHOT_RETRIES = 3
 SNAPSHOT_RETRY_SECONDS = 10
+REFUSED_CODES = ('UnauthorizedOperation', 'AccessDenied')
 
 
 class CleanupError(Exception):
@@ -44,6 +47,10 @@ def test_filters(github_run):
 def is_test_resource(resource, github_run):
     tags = {t['Key']: t['Value'] for t in resource.get('Tags', [])}
     return tags.get(TEST_TAG) == 'true' and tags.get(RUN_TAG) == github_run
+
+
+def refused(error):
+    return error.response.get('Error', {}).get('Code') in REFUSED_CODES
 
 
 def snapshot_ids(image):
@@ -79,28 +86,60 @@ def tagged_snapshots(ec2, github_run):
 
 
 def cleanup_region(ec2, region, github_run):
-    """Remove the run's test copies and their snapshots in one region."""
+    """Remove the run's test copies and their snapshots in one region; return those the role may not delete."""
+    kept = []
     for image in live_images(ec2, github_run):
         if not is_test_resource(image, github_run):
             raise CleanupError(f"Refusing to touch {image['ImageId']} in {region}: not a test copy of {github_run}")
         snaps = snapshot_ids(image)
         print(f"Deregistering {image['ImageId']} in {region}")
-        ec2.deregister_image(ImageId=image['ImageId'])
+        try:
+            ec2.deregister_image(ImageId=image['ImageId'])
+        except ClientError as e:
+            if not refused(e):
+                raise
+            kept += [image['ImageId'], *snaps]
+            continue
         for snap_id in snaps:
             print(f"Deleting snapshot {snap_id} in {region}")
-            delete_snapshot(ec2, snap_id)
+            try:
+                delete_snapshot(ec2, snap_id)
+            except ClientError as e:
+                if not refused(e):
+                    raise
+                kept.append(snap_id)
 
     # Snapshots left behind by a copy that failed before its AMI registered.
     for snap in tagged_snapshots(ec2, github_run):
+        if snap['SnapshotId'] in kept:
+            continue
         if not is_test_resource(snap, github_run):
             raise CleanupError(f"Refusing to touch {snap['SnapshotId']} in {region}: not a test snapshot of {github_run}")
         print(f"Deleting leftover snapshot {snap['SnapshotId']} in {region}")
-        delete_snapshot(ec2, snap['SnapshotId'])
+        try:
+            delete_snapshot(ec2, snap['SnapshotId'])
+        except ClientError as e:
+            if not refused(e):
+                raise
+            kept.append(snap['SnapshotId'])
 
     remaining = [i['ImageId'] for i in live_images(ec2, github_run)]
     remaining += [s['SnapshotId'] for s in tagged_snapshots(ec2, github_run)]
+    remaining = [r for r in remaining if r not in kept]
     if remaining:
         raise CleanupError(f"Still present in {region}: {', '.join(remaining)}")
+    return kept
+
+
+def report_kept(kept):
+    """Warn about the copies the role may not delete, in the log and the job summary."""
+    lines = [f"{region}: {', '.join(ids)}" for region, ids in kept.items()]
+    print(f"::warning::This role may not delete test copies. Delete them by hand: {'; '.join(lines)}")
+    summary = os.environ.get('GITHUB_STEP_SUMMARY')
+    if summary:
+        with open(summary, 'a') as fh:
+            fh.write("Test copies left for deletion by hand:\n\n")
+            fh.writelines(f"- {line}\n" for line in lines)
 
 
 def main(argv=None):
@@ -112,15 +151,22 @@ def main(argv=None):
         sys.exit(1)
 
     failed = False
+    kept = {}
     for region in regions:
         try:
-            cleanup_region(get_client('ec2', region), region, github_run)
+            left = cleanup_region(get_client('ec2', region), region, github_run)
         except (BotoCoreError, ClientError, CleanupError) as e:
             print(f"::error::Cleanup failed in {region}: {e}")
             failed = True
+            continue
+        if left:
+            kept[region] = left
+    if kept:
+        report_kept(kept)
     if failed:
         sys.exit(1)
-    print(f"No test copies of {github_run} left in {', '.join(regions)}")
+    if not kept:
+        print(f"No test copies of {github_run} left in {', '.join(regions)}")
 
 
 if __name__ == "__main__":

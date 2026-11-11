@@ -44,7 +44,7 @@ env:
   METATEMPLATE_PATH: "./${{ inputs.metatemplate_file_path }}"
   TEMPLATE_FILENAME: "${{ inputs.matlab_version }}-release-template.json"
   RELEASE_ARTIFACT_NAME: "${{ inputs.matlab_version }}-release-template"
-  # Unless RELEASE_DRY_RUN is 'false', the AMI copies are not made public.
+  # Unless RELEASE_DRY_RUN is 'false', a dry run: the AMI copies stay private and nothing is published.
   DRY_RUN: ${{ vars.RELEASE_DRY_RUN != 'false' }}
 
 jobs:
@@ -79,7 +79,7 @@ jobs:
             echo "::error::TARGET_REGIONS is empty. Set vars.TARGET_REGIONS on the calling repository."
             FAILED=1
           fi
-          if [ -z "$RELEASE_BUCKET" ]; then
+          if [ "$DRY_RUN" == "false" ] && [ -z "$RELEASE_BUCKET" ]; then
             echo "::error::RELEASE_BUCKET is empty. Set vars.RELEASE_BUCKET on the calling repository."
             FAILED=1
           fi
@@ -176,6 +176,7 @@ jobs:
 
       - name: Publish Release Template
         id: publish_template
+        if: env.DRY_RUN == 'false'
         uses: mathworks-ref-arch/iac-building-blocks/.github/actions/publish-release-template@experimental
         with:
           template_file: ${{ env.TEMPLATE_FILENAME }}
@@ -185,11 +186,13 @@ jobs:
 
       # The commit-back job links the release README to the template as published.
       - name: Record Template URL
+        if: env.DRY_RUN == 'false'
         env:
           TEMPLATE_URL: ${{ steps.publish_template.outputs.template_url }}
         run: echo "$TEMPLATE_URL" > "${{ inputs.matlab_version }}-release-template-url.txt"
 
       - name: Upload Template Name and URL
+        if: env.DRY_RUN == 'false'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.matlab_version }}-release-template-location
@@ -206,9 +209,11 @@ jobs:
         run: |
           python3 - >> "$GITHUB_STEP_SUMMARY" <<'EOF'
           import json, os
-          dry_run = " (dry run: AMI copies not made public)" if os.environ["DRY_RUN"] == "true" else ""
-          print(f"### {os.environ['MATLAB_VERSION']} release{dry_run}\n")
-          print(f"Template ({os.environ['TEMPLATE_RESULT']}): {os.environ['TEMPLATE_URL']}\n")
+          if os.environ["DRY_RUN"] == "true":
+              print(f"### {os.environ['MATLAB_VERSION']} dry run: AMI copies kept private, nothing published\n")
+          else:
+              print(f"### {os.environ['MATLAB_VERSION']} release\n")
+              print(f"Template ({os.environ['TEMPLATE_RESULT']}): {os.environ['TEMPLATE_URL']}\n")
           print("| Region | AMI | State |\n| :--- | :--- | :--- |")
           for copy in json.loads(os.environ["COPIES_JSON"]):
               print(f"| {copy['region']} | {copy['ami_id']} | {copy['state']} |")

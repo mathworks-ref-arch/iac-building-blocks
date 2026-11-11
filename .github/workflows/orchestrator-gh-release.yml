@@ -96,8 +96,9 @@ on:
 
 jobs:
 
+  # A release dry run (RELEASE_DRY_RUN not 'false') commits nothing and is published as a build.
   commit-release-files:
-    if: ${{ inputs.is_supplementary_build == false }}
+    if: ${{ inputs.is_supplementary_build == false && vars.RELEASE_DRY_RUN == 'false' }}
     name: Commit release files into repository
     uses: mathworks-ref-arch/iac-building-blocks/.github/workflows/module-gh-commit-files.yml@experimental
     with:
@@ -118,7 +119,7 @@ jobs:
       release_tag: ${{ inputs.release_tag }}
       release_title: ${{ inputs.release_title }}
       release_name: ${{ inputs.release_name }}
-      is_supplementary_build: ${{ inputs.is_supplementary_build }}
+      is_supplementary_build: ${{ inputs.is_supplementary_build || vars.RELEASE_DRY_RUN != 'false' }}
       target_commitish: ${{ needs.commit-release-files.outputs.release_sha || github.sha }}
       prerelease: false
       generate_attestations: ${{ inputs.generate_attestations }}

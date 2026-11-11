@@ -1,7 +1,13 @@
 # Copyright 2026 The MathWorks, Inc.
 """Tests for cleanup.py with stubbed AWS clients (no AWS calls)."""
+import io
+import os
+import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
+
+from botocore.exceptions import ClientError
 
 from helpers import StubbedClients, image
 
@@ -70,6 +76,34 @@ class CleanupTestCase(unittest.TestCase):
         self.expect_snapshots([])
         cleanup.cleanup_region(self.ec2(), REGION, RUN)
         cleanup.time.sleep.assert_called_once_with(cleanup.SNAPSHOT_RETRY_SECONDS)
+
+    def test_keeps_copies_the_role_may_not_delete(self):
+        self.expect_images([image('ami-0test', tags=TEST_TAGS, snaps=('snap-01',))])
+        self.stub.add_client_error('deregister_image', 'UnauthorizedOperation', expected_params={'ImageId': 'ami-0test'})
+        self.expect_snapshots([{'SnapshotId': 'snap-01', 'Tags': [{'Key': k, 'Value': v} for k, v in TEST_TAGS.items()]}])
+        self.expect_images([image('ami-0test', tags=TEST_TAGS, snaps=('snap-01',))])
+        self.expect_snapshots([{'SnapshotId': 'snap-01', 'Tags': [{'Key': k, 'Value': v} for k, v in TEST_TAGS.items()]}])
+        self.assertEqual(cleanup.cleanup_region(self.ec2(), REGION, RUN), ['ami-0test', 'snap-01'])
+
+    def test_other_delete_errors_still_fail(self):
+        self.expect_images([image('ami-0test', tags=TEST_TAGS, snaps=('snap-01',))])
+        self.stub.add_client_error('deregister_image', 'InvalidAMIID.Unavailable', expected_params={'ImageId': 'ami-0test'})
+        with self.assertRaises(ClientError):
+            cleanup.cleanup_region(self.ec2(), REGION, RUN)
+
+    def test_main_warns_and_succeeds_when_deletes_are_refused(self):
+        self.expect_images([image('ami-0test', tags=TEST_TAGS, snaps=())])
+        self.stub.add_client_error('deregister_image', 'UnauthorizedOperation', expected_params={'ImageId': 'ami-0test'})
+        self.expect_snapshots([])
+        self.expect_images([image('ami-0test', tags=TEST_TAGS, snaps=())])
+        self.expect_snapshots([])
+        with tempfile.NamedTemporaryFile('r', suffix='.md') as summary, \
+                mock.patch.dict(os.environ, {'GITHUB_STEP_SUMMARY': summary.name}):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                cleanup.main(['--regions', REGION, '--github-run', RUN])
+            self.assertIn('::warning::', out.getvalue())
+            self.assertIn(f'{REGION}: ami-0test', summary.read())
 
     def test_rejects_wildcard_run(self):
         with self.assertRaises(SystemExit) as exit_info:
