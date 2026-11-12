@@ -82,7 +82,13 @@ def live_images(ec2, github_run):
 
 
 def tagged_snapshots(ec2, github_run):
-    return ec2.describe_snapshots(OwnerIds=['self'], Filters=test_filters(github_run))['Snapshots']
+    # A role that may not delete (the prod release role) may not list snapshots either.
+    try:
+        return ec2.describe_snapshots(OwnerIds=['self'], Filters=test_filters(github_run))['Snapshots']
+    except ClientError as e:
+        if not refused(e):
+            raise
+        return []
 
 
 def cleanup_region(ec2, region, github_run):

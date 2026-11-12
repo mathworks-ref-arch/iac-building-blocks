@@ -77,12 +77,17 @@ class CleanupTestCase(unittest.TestCase):
         cleanup.cleanup_region(self.ec2(), REGION, RUN)
         cleanup.time.sleep.assert_called_once_with(cleanup.SNAPSHOT_RETRY_SECONDS)
 
+    def refuse_snapshots(self):
+        self.stub.add_client_error('describe_snapshots', 'UnauthorizedOperation',
+                                   expected_params={'OwnerIds': ['self'], 'Filters': FILTERS})
+
+    # Like the prod release role: no deletes, and no DescribeSnapshots.
     def test_keeps_copies_the_role_may_not_delete(self):
         self.expect_images([image('ami-0test', tags=TEST_TAGS, snaps=('snap-01',))])
         self.stub.add_client_error('deregister_image', 'UnauthorizedOperation', expected_params={'ImageId': 'ami-0test'})
-        self.expect_snapshots([{'SnapshotId': 'snap-01', 'Tags': [{'Key': k, 'Value': v} for k, v in TEST_TAGS.items()]}])
+        self.refuse_snapshots()
         self.expect_images([image('ami-0test', tags=TEST_TAGS, snaps=('snap-01',))])
-        self.expect_snapshots([{'SnapshotId': 'snap-01', 'Tags': [{'Key': k, 'Value': v} for k, v in TEST_TAGS.items()]}])
+        self.refuse_snapshots()
         self.assertEqual(cleanup.cleanup_region(self.ec2(), REGION, RUN), ['ami-0test', 'snap-01'])
 
     def test_other_delete_errors_still_fail(self):
@@ -94,9 +99,9 @@ class CleanupTestCase(unittest.TestCase):
     def test_main_warns_and_succeeds_when_deletes_are_refused(self):
         self.expect_images([image('ami-0test', tags=TEST_TAGS, snaps=())])
         self.stub.add_client_error('deregister_image', 'UnauthorizedOperation', expected_params={'ImageId': 'ami-0test'})
-        self.expect_snapshots([])
+        self.refuse_snapshots()
         self.expect_images([image('ami-0test', tags=TEST_TAGS, snaps=())])
-        self.expect_snapshots([])
+        self.refuse_snapshots()
         with tempfile.NamedTemporaryFile('r', suffix='.md') as summary, \
                 mock.patch.dict(os.environ, {'GITHUB_STEP_SUMMARY': summary.name}):
             out = io.StringIO()
